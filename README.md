@@ -301,6 +301,29 @@ cargo build --release --target aarch64-pc-windows-msvc
 
 ---
 
+## Developer Library Examples
+
+In addition to the multi-call CLI binary, `impacket-rs` provides modular crates that can be used directly as Rust dependencies. Standalone examples live in `examples/`:
+
+- **Offline Secrets Dump**: [`bins/impacket-rs/examples/offline_secretsdump.rs`](file:///Users/nestho/impacket-rs/bins/impacket-rs/examples/offline_secretsdump.rs)
+  ```bash
+  cargo run -p impacket-rs --example offline_secretsdump -- /path/to/SAM /path/to/SYSTEM
+  ```
+- **Compile-Time NDR Serialization**: [`bins/impacket-rs/examples/ndr_serialization.rs`](file:///Users/nestho/impacket-rs/bins/impacket-rs/examples/ndr_serialization.rs)
+  ```bash
+  cargo run -p impacket-rs --example ndr_serialization
+  ```
+- **Kerberos CCache / Kirbi Inspector**: [`bins/impacket-rs/examples/krb5_ccache.rs`](file:///Users/nestho/impacket-rs/bins/impacket-rs/examples/krb5_ccache.rs)
+  ```bash
+  cargo run -p impacket-rs --example krb5_ccache -- ticket.ccache
+  ```
+- **NTLMv2 3-Way Handshake Simulation**: [`bins/impacket-rs/examples/ntlm_auth_handshake.rs`](file:///Users/nestho/impacket-rs/bins/impacket-rs/examples/ntlm_auth_handshake.rs)
+  ```bash
+  cargo run -p impacket-rs --example ntlm_auth_handshake
+  ```
+
+---
+
 ## Architecture & Crates
 
 ```text

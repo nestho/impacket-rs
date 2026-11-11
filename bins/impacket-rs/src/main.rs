@@ -11289,7 +11289,25 @@ fn cmd_sniffer(args: &[String]) {
 }
 
 fn main() {
-    let args: Vec<String> = env::args().skip(1).collect();
+    let all_args: Vec<String> = env::args().collect();
+    let raw_name = all_args.first().map(|p| {
+        std::path::Path::new(p)
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("")
+    }).unwrap_or("");
+    let prog_name = raw_name
+        .trim_end_matches(".exe")
+        .trim_end_matches(".py");
+
+    let args: Vec<String> = if prog_name != "impacket-rs" && !prog_name.is_empty() && prog_name != "impacket" {
+        let mut a = vec![prog_name.to_string()];
+        a.extend(all_args.into_iter().skip(1));
+        a
+    } else {
+        all_args.into_iter().skip(1).collect()
+    };
+
     match args.first().map(|s| s.as_str()) {
         Some("DumpNTLMInfo") | Some("dump-ntlm-info") => cmd_dump_ntlm_info(&args[1..]),
         Some("GetNPUsers") | Some("get-np-users") => cmd_get_np_users(&args[1..]),
