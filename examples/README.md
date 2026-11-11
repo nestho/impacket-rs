@@ -2,6 +2,8 @@
 
 Standalone examples showing how to use `impacket-rs` modular crates as native Rust libraries in your own projects.
 
+> 📖 Looking for command-line tool usage instead of code examples? See the [**Command Reference & Usage Examples Guide (`docs/COMMAND_REFERENCE.md`)**](../docs/COMMAND_REFERENCE.md) for full syntax and examples for all 74 CLI tools.
+
 | Example Source | Description | Command |
 |---|---|---|
 | [`offline_secretsdump.rs`](file:///Users/nestho/impacket-rs/bins/impacket-rs/examples/offline_secretsdump.rs) | Offline extraction of SysKey & SAM password hashes from registry hives | `cargo run -p impacket-rs --example offline_secretsdump -- SAM SYSTEM` |

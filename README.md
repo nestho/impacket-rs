@@ -210,6 +210,8 @@ cargo build --release --target aarch64-pc-windows-msvc
 
 ## Tool Catalog (74 Subcommands)
 
+> 📖 **Complete Examples Page**: See [**`docs/COMMAND_REFERENCE.md`**](docs/COMMAND_REFERENCE.md) for detailed, copy-pastable command examples, authentication options, and flag breakdowns for all 74 tools.
+
 `impacket-rs` is a single multi-call binary. You can invoke tools directly or symlink any tool name to the binary:
 
 ### 1. Remote Execution
