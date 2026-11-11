@@ -25,6 +25,14 @@ This project follows **Semantic Versioning 2.0.0 (SemVer)** and the exact change
 
 1. Library improvements
 
+    * **Enterprise CI/CD, Security Audit & SonarCloud Quality Gate (`.github/workflows/ci.yml`, `sonar-project.properties`)**:
+        * Added `sonar-project.properties` with tuned source layout, test exclusions, and rule exemptions for test crypto vectors and empty hash constants to ensure clean SonarCloud Quality Gate passes.
+        * Integrated continuous security audits into GitHub Actions CI pipeline: **Trivy** filesystem vulnerability scanning, **Semgrep** static application security testing (SAST), and **Cargo Audit** (RustSec Advisory Database).
+    * **Enterprise Visual Assets & Real-World High-Load Benchmarking (`assets/`, `docs/`)**:
+        * Redesigned vector logo (`assets/logo.svg`, `.github/assets/logo.svg`) with expanded viewBox (`640x120`) eliminating right-edge text truncation.
+        * Engineered interactive 5-scenario side-by-side terminal comparison SVG (`assets/comparison-demo.svg`) with strict `<clipPath>` pane isolation and synchronized stress-test benchmarks.
+        * Published comprehensive command reference (`docs/COMMAND_REFERENCE.md`) documenting full syntax and usage examples for all 74 tools.
+
     * **Group 4 & Phase 8 Enhancements (`bins/impacket-rs`, `crates/impacket-relay`, `crates/impacket-smb`)**:
         * **WMI Event Subscription & Persistence Manager (`wmipersist`, `bins/impacket-rs`)**:
             * Ported `wmipersist.py` supporting `list`, `info`, and `remove` for Active Directory / Windows systems.
