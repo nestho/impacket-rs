@@ -51,6 +51,8 @@ git checkout -b fix/issue-description
 ```
 
 ### 3. Repository Architecture
+See [**`docs/ARCHITECTURE.md`**](docs/ARCHITECTURE.md) for full crate design, compatibility tiers, and engineering details.
+
 Place your changes in the appropriate crate or directory:
 - `crates/impacket-core`: Core primitives, target parsing, NTSTATUS, `AdCompatProfile`.
 - `crates/impacket-crypto`: Cryptographic algorithms (AES, DES, RC4, MD4/5, Kerberos n-fold, etc.).

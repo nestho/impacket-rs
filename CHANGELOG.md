@@ -37,6 +37,7 @@ This project follows **Semantic Versioning 2.0.0 (SemVer)** and the exact change
         * Added clean crypto donation endpoints (USDT-TRC20 and BTC-BSC) in `README.md`.
         * Clarified cross-platform host and target ecosystem support (Linux, macOS, Windows; Samba, FreeIPA, Windows 2000 to Server 2025) across `Cargo.toml` and documentation.
         * Published comprehensive contribution guidelines (`CONTRIBUTING.md`), Pull Request template (`.github/pull_request_template.md`), and PR review policy emphasizing pure-Rust architecture, memory safety, protected `main` branch, and security audit gates.
+        * Reorganized technical roadmap and architecture specifications into `docs/` (`docs/VISION_AND_ROADMAP.md` and `docs/ARCHITECTURE.md`).
 
     * **Group 4 & Phase 8 Enhancements (`bins/impacket-rs`, `crates/impacket-relay`, `crates/impacket-smb`)**:
         * **WMI Event Subscription & Persistence Manager (`wmipersist`, `bins/impacket-rs`)**:

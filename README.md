@@ -337,6 +337,8 @@ In addition to the multi-call CLI binary, `impacket-rs` provides modular crates 
 
 ## Architecture & Crates
 
+> 📐 **Deep-Dive Specifications**: See [**`docs/ARCHITECTURE.md`**](docs/ARCHITECTURE.md) for crate architecture, cross-era compatibility tiers, and SemVer strategy, and [**`docs/VISION_AND_ROADMAP.md`**](docs/VISION_AND_ROADMAP.md) for engineering audits, Python vs. Rust benchmarks, and memory safety analysis.
+
 ```text
 impacket-rs/
 ├── crates/
