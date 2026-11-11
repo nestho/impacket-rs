@@ -50,6 +50,10 @@ Benchmarks executed on Apple Silicon (M-series, 10-core) and Linux (AMD EPYC, 8-
 
 ## Interactive Command Previews
 
+<p align="center">
+  <img src="assets/demo.svg" alt="Impacket-RS Animated Terminal Preview" width="100%"/>
+</p>
+
 ### 1. `secretsdump` (Remote SAM, LSA & Active Directory DCSync)
 ```text
 $ impacket-rs secretsdump corp.local/administrator:Password123@192.168.1.10
