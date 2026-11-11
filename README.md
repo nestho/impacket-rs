@@ -377,6 +377,18 @@ If you find `impacket-rs` useful for your research, assessments, or tooling, con
 
 ---
 
+## Contributing
+
+Contributions, bug reports, and enhancements are welcome! To maintain strict security, memory safety, and architectural consistency:
+
+1. **Protected `main` Branch**: Direct commits to `main` are restricted. All changes must be submitted via Pull Requests from a fork or topic branch.
+2. **Review & Approval Process**: Every PR is thoroughly reviewed by [@nestho](https://github.com/nestho) for idiomatic Rust, crate architecture, test coverage, and security implications before being merged.
+3. **Automated CI Gates**: PRs must compile across Linux, macOS, and Windows, pass all tests, and pass SAST/security checks (Trivy, Cargo Audit, and SonarCloud).
+
+For detailed coding standards, crate structure, and local validation steps, see [**`CONTRIBUTING.md`**](CONTRIBUTING.md).
+
+---
+
 ## License
 
 This project is licensed under the **Apache License 2.0** - see the [LICENSE](LICENSE) file for details.
