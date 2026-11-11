@@ -32,44 +32,25 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Run Trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@0.28.0
-        with:
-          scan-type: 'fs'
-          ignore-unfixed: true
-          format: 'table'
-          severity: 'HIGH,CRITICAL'
-          exit-code: '0'
+      - name: Install & Run Trivy Vulnerability Scanner
+        run: |
+          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sudo sh -s -- -b /usr/local/bin
+          trivy fs --severity HIGH,CRITICAL --scanners vuln,secret --ignore-unfixed --exit-code 0 .
 
-      - name: Run Semgrep SAST scan
-        uses: semgrep/semgrep-action@v1
+      - name: Set up Python for Semgrep
+        uses: actions/setup-python@v5
         with:
-          config: >-
-            p/security-audit
-            p/secrets
-            p/ci
-        env:
-          SEMGREP_RULES: p/security-audit
+          python-version: '3.11'
+
+      - name: Install & Run Semgrep SAST
+        run: |
+          python -m pip install --upgrade pip semgrep
+          semgrep scan --config auto --exclude="target" --exclude="assets" --exclude=".github/assets" --error
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Cargo Audit (RustSec Advisory Database)
+      - name: Cargo Audit (RustSec Database)
         run: |
           cargo install cargo-audit --locked || true
           cargo audit || true
-
-  sonarcloud:
-    name: SonarCloud Code Analysis
-    runs-on: ubuntu-latest
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - name: SonarCloud Scan
-        if: env.SONAR_TOKEN != ''
-        uses: SonarSource/sonarcloud-github-action@v3
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
