@@ -5,7 +5,7 @@ edition.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
-description = "Unified multi-call CLI for Impacket-RS tools and cross-era Active Directory protocol engines"
+description = "Unified multi-call CLI for Impacket-RS tools, Active Directory, and Linux/Samba protocol engines"
 
 [[bin]]
 name = "impacket-rs"

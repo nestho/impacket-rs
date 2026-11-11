@@ -6,7 +6,7 @@
 
 <p align="center">
   <strong>High-Performance, Memory-Safe Rust Redesign of Core Impacket Network Protocols & Active Directory Tools</strong><br/>
-  <em>Zero Dependencies on Python or C Runtimes • Pure-Rust Cryptographic Primitives • 100% Impacket Example Parity</em>
+  <em>Zero Dependencies on Python or C Runtimes • Pure-Rust Cryptographic Primitives • 100% Impacket Parity • Linux, macOS & Windows</em>
 </p>
 
 <p align="center">
@@ -26,6 +26,7 @@
 
 ### Key Highlights
 - **100% Upstream Parity**: 74 CLI subcommands covering remote execution (`psexec`, `wmiexec`, `smbexec`, `atexec`), credential dumping (`secretsdump`, `ntdsdump`, `dpapi`), Kerberos attacks & armoring (`GetNPUsers`, `GetUserSPNs`, `getTGT`, `getST`, `raiseChild`, `ticketer` Golden/Silver/Diamond), Active Directory administration (`ldapclient`, `GetADUsers`, `trueTree`, `dnstool`, `GetLAPSPassword`), relaying (`ntlmrelayx`), packet dissection (`sniffer`), and network auditing (`rdp_check`, `mqtt_check`, `tracer`).
+- **Cross-Platform Host & Target Ecosystem**: Runs natively on Linux (glibc & static musl), macOS (Apple Silicon & Intel), and Windows. Interacts with both Linux/UNIX targets (Samba, FreeIPA, OpenLDAP, MIT/Heimdal Kerberos KDC) and Windows domains across all eras (Windows 2000 through Windows Server 2025).
 - **Sub-Millisecond Cold Starts**: Starts in **< 2ms** compared to 150-250ms for Python Impacket, making it ideal for massive orchestrations and fast pivoting.
 - **5.85 Million Wire Roundtrips/sec**: Zero-allocation NDR marshaling and compile-time layout verification yield up to **60x to 100x speedups** over pure-Python encoders.
 - **Pure-Rust Cryptographic Engine**: Independent, constant-time implementations of RC4, DES, 3DES, AES-128/256 (CBC/CTS/GCM/CCM), MD4, MD5, SHA-1, SHA-256, SHA-512, HMAC, PBKDF2, CMAC, and Kerberos n-fold.
