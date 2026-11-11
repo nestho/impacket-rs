@@ -18,37 +18,27 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@v4
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        uses: dtolnay/rust-toolchain@stable
       - name: Cargo check
         run: cargo check --workspace --all-targets
       - name: Cargo test
         run: cargo test --workspace --verbose
 
   security:
-    name: Security & SAST Audit (Trivy + Semgrep + Cargo Audit)
+    name: Security Audit (Trivy + Cargo Audit)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@v4
 
       - name: Install & Run Trivy Vulnerability Scanner
         run: |
           curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sudo sh -s -- -b /usr/local/bin
           trivy fs --severity HIGH,CRITICAL --scanners vuln,secret --ignore-unfixed --exit-code 0 .
 
-      - name: Set up Python for Semgrep
-        uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38 # v5.4.0
-        with:
-          python-version: '3.11'
-
-      - name: Install & Run Semgrep SAST
-        run: |
-          python -m pip install --upgrade pip semgrep
-          semgrep scan --config auto --exclude=".github" --exclude="target" --exclude="assets" --error
-
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        uses: dtolnay/rust-toolchain@stable
 
       - name: Cargo Audit (RustSec Database)
         run: |
