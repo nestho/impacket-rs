@@ -1,0 +1,8 @@
+[package]
+name = "impacket-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Core types, Impacket target/credential parser, NTSTATUS error catalog, and zeroized secret primitives"
+
+[dependencies]

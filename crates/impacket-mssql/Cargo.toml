@@ -1,0 +1,11 @@
+[package]
+name = "impacket-mssql"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Pure-Rust Microsoft SQL Server Tabular Data Stream (TDS 7.x, [MS-TDS]) client engine with NTLM/SSPI and SQL authentication"
+
+[dependencies]
+impacket-core = { path = "../impacket-core" }
+impacket-crypto = { path = "../impacket-crypto" }
+impacket-auth = { path = "../impacket-auth" }

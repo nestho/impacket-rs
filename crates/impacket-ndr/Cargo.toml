@@ -1,0 +1,9 @@
+[package]
+name = "impacket-ndr"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Compile-time and zero-copy NDR (MS-RPCE) transfer syntax engine replacing impacket/structure.py and ndr.py"
+
+[dependencies]
+impacket-core = { path = "../impacket-core" }

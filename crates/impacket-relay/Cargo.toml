@@ -1,0 +1,13 @@
+[package]
+name = "impacket-relay"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "NTLM cross-protocol relay engine and state machine (HTTP, SMB, LDAP, MSSQL) mirroring impacket/examples/ntlmrelayx"
+
+[dependencies]
+impacket-core = { path = "../impacket-core" }
+impacket-crypto = { path = "../impacket-crypto" }
+impacket-auth = { path = "../impacket-auth" }
+impacket-smb = { path = "../impacket-smb" }
+impacket-ldap = { path = "../impacket-ldap" }

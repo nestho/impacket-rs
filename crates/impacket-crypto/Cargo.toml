@@ -1,0 +1,9 @@
+[package]
+name = "impacket-crypto"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Pure-Rust cryptographic primitives for legacy (Win2000/2003 DES/LM/MD4/RC4) and modern Active Directory protocols"
+
+[dependencies]
+impacket-core = { path = "../impacket-core" }

@@ -1,0 +1,11 @@
+[package]
+name = "impacket-krb5"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Cross-era Kerberos v5 ASN.1 DER engine (DES, RC4-HMAC, AES128, AES256), AS-REQ/KRB-ERROR, and ccache/kirbi support"
+
+[dependencies]
+impacket-core = { path = "../impacket-core" }
+impacket-crypto = { path = "../impacket-crypto" }
+impacket-ndr = { path = "../impacket-ndr" }

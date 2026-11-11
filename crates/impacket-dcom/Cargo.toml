@@ -1,0 +1,11 @@
+[package]
+name = "impacket-dcom"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Distributed Component Object Model [MS-DCOM] Object RPC (ORPC) framing, DUALSTRINGARRAY, and IObjectExporter network resolver"
+
+[dependencies]
+impacket-core = { path = "../impacket-core" }
+impacket-ndr = { path = "../impacket-ndr" }
+impacket-dcerpc = { path = "../impacket-dcerpc" }

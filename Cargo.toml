@@ -1,0 +1,26 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/impacket-core",
+    "crates/impacket-crypto",
+    "crates/impacket-ndr",
+    "crates/impacket-auth",
+    "crates/impacket-krb5",
+    "crates/impacket-smb",
+    "crates/impacket-dcerpc",
+    "crates/impacket-msrpc",
+    "crates/impacket-sam",
+    "crates/impacket-ldap",
+    "crates/impacket-dcom",
+    "crates/impacket-relay",
+    "crates/impacket-mssql",
+    "bins/impacket-rs",
+]
+
+[workspace.package]
+version = "0.1.0-dev"
+edition = "2021"
+authors = ["Nestho <63925710+nestho@users.noreply.github.com>"]
+license = "Apache-2.0"
+repository = "https://github.com/nestho/impacket-rs"
+description = "High-performance, memory-safe Rust redesign of core Impacket network protocols and Active Directory tools (Win2000 to Win2025)"

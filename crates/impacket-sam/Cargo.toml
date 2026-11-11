@@ -1,0 +1,11 @@
+[package]
+name = "impacket-sam"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Cross-era Windows SYSTEM BootKey recovery and SAM/NTDS hash decryption (Legacy RC4+DES Win2000-2012R2 & Modern AES-128+DES Win2016-2025)"
+
+[dependencies]
+impacket-core = { path = "../impacket-core" }
+impacket-crypto = { path = "../impacket-crypto" }
+impacket-ndr = { path = "../impacket-ndr" }

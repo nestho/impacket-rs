@@ -1,0 +1,27 @@
+[package]
+name = "impacket-rs"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Unified multi-call CLI for Impacket-RS tools and cross-era Active Directory protocol engines"
+
+[[bin]]
+name = "impacket-rs"
+path = "src/main.rs"
+
+[dependencies]
+impacket-core = { path = "../../crates/impacket-core" }
+impacket-crypto = { path = "../../crates/impacket-crypto" }
+impacket-ndr = { path = "../../crates/impacket-ndr" }
+impacket-auth = { path = "../../crates/impacket-auth" }
+impacket-krb5 = { path = "../../crates/impacket-krb5" }
+impacket-smb = { path = "../../crates/impacket-smb" }
+impacket-dcerpc = { path = "../../crates/impacket-dcerpc" }
+impacket-msrpc = { path = "../../crates/impacket-msrpc" }
+impacket-sam = { path = "../../crates/impacket-sam" }
+impacket-ldap = { path = "../../crates/impacket-ldap" }
+impacket-dcom = { path = "../../crates/impacket-dcom" }
+impacket-relay = { path = "../../crates/impacket-relay" }
+impacket-mssql = { path = "../../crates/impacket-mssql" }

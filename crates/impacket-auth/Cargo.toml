@@ -1,0 +1,10 @@
+[package]
+name = "impacket-auth"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Cross-era NTLMSSP (LMv1, NTLMv1, ESS, NTLMv2, AV_PAIRs, EPA Channel Binding) and SPNEGO ASN.1 engine"
+
+[dependencies]
+impacket-core = { path = "../impacket-core" }
+impacket-crypto = { path = "../impacket-crypto" }

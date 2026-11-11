@@ -1,0 +1,11 @@
+[package]
+name = "impacket-dcerpc"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "MS-RPCE v5 PDU framing, Endpoint Mapper (EPM), SAMR, and LSARPC protocol stubs"
+
+[dependencies]
+impacket-core = { path = "../impacket-core" }
+impacket-ndr = { path = "../impacket-ndr" }
+impacket-auth = { path = "../impacket-auth" }

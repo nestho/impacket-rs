@@ -1,0 +1,12 @@
+[package]
+name = "impacket-ldap"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Active Directory LDAP / LDAPS query engine, RFC 4511 ASN.1 BER message codec, and [MS-DTYP] Section 2.4.6 Security Descriptor / ACL parser"
+
+[dependencies]
+impacket-core = { path = "../impacket-core" }
+impacket-crypto = { path = "../impacket-crypto" }
+impacket-ndr = { path = "../impacket-ndr" }
+impacket-auth = { path = "../impacket-auth" }

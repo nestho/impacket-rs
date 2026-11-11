@@ -1,0 +1,14 @@
+[package]
+name = "impacket-msrpc"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Cross-era Active Directory MSRPC interfaces (MS-LSAD, MS-LSAT, MS-SAMR, MS-SRVS) over SMB Named Pipes (ncacn_np) and TCP"
+
+[dependencies]
+impacket-core = { path = "../impacket-core" }
+impacket-crypto = { path = "../impacket-crypto" }
+impacket-ndr = { path = "../impacket-ndr" }
+impacket-auth = { path = "../impacket-auth" }
+impacket-smb = { path = "../impacket-smb" }
+impacket-dcerpc = { path = "../impacket-dcerpc" }
