@@ -1,7 +1,7 @@
 # Impacket-RS
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/nestho/impacket-rs/main/.github/assets/logo.png" alt="Impacket-RS Logo" width="220" onerror="this.style.display='none'"/>
+  <img src="assets/logo.svg" alt="Impacket-RS Logo" width="480"/>
 </p>
 
 <p align="center">
@@ -34,6 +34,10 @@
 ---
 
 ## Performance Comparison (Python vs Impacket-RS)
+
+<p align="center">
+  <img src="assets/comparison-demo.svg" alt="Impacket-RS vs Python Impacket Benchmark" width="100%"/>
+</p>
 
 Benchmarks executed on Apple Silicon (M-series, 10-core) and Linux (AMD EPYC, 8-core) comparing Python 3.11 Impacket v0.12.0 against `impacket-rs` v0.1.0-dev (release build):
 

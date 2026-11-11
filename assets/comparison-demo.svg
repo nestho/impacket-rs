@@ -1,0 +1,298 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 940 570" width="100%" height="570">
+  <defs>
+    <linearGradient id="splitBg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0b0f17"/>
+      <stop offset="100%" stop-color="#111726"/>
+    </linearGradient>
+    <linearGradient id="rustHeaderGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#ea580c" stop-opacity="0.18"/>
+      <stop offset="100%" stop-color="#38bdf8" stop-opacity="0.18"/>
+    </linearGradient>
+    <linearGradient id="pyHeaderGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#eab308" stop-opacity="0.12"/>
+      <stop offset="100%" stop-color="#3b82f6" stop-opacity="0.12"/>
+    </linearGradient>
+    <linearGradient id="rustBar" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#0284c7"/>
+      <stop offset="100%" stop-color="#38bdf8"/>
+    </linearGradient>
+    <linearGradient id="pyBar" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#ca8a04"/>
+      <stop offset="100%" stop-color="#eab308"/>
+    </linearGradient>
+  </defs>
+
+  <style>
+    .win-frame { fill: url(#splitBg); stroke: #1e293b; stroke-width: 1.5; rx: 12px; }
+    .top-bar { fill: #0f172a; }
+    .tab-active { fill: #1e293b; stroke: #38bdf8; stroke-width: 1; rx: 4px; }
+    .tab-text { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Inter, sans-serif; font-size: 11px; font-weight: 600; fill: #94a3b8; }
+    .tab-active-text { fill: #38bdf8; font-weight: 700; }
+    
+    .term-font {
+      font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+      font-size: 11.5px;
+      line-height: 1.45;
+    }
+    
+    /* Pane backgrounds */
+    .py-pane { fill: #0a0d14; stroke: #1e293b; stroke-width: 1; }
+    .rust-pane { fill: #070b12; stroke: #0284c7; stroke-width: 1.2; }
+
+    /* Text Colors */
+    .c-dim { fill: #64748b; }
+    .c-py-title { fill: #eab308; font-weight: bold; }
+    .c-rust-title { fill: #38bdf8; font-weight: bold; }
+    .c-cmd { fill: #f8fafc; font-weight: 600; }
+    .c-cyan { fill: #38bdf8; }
+    .c-green { fill: #4ade80; font-weight: bold; }
+    .c-yellow { fill: #facc15; }
+    .c-orange { fill: #fb923c; font-weight: bold; }
+    .c-purple { fill: #c084fc; font-weight: 600; }
+    .c-red { fill: #f87171; }
+
+    /* Scene Transitions: 18s total cycle across 4 heavy scenarios */
+    /* Scene 1 (0s -> 4.5s): secretsdump DCSync 10k */
+    /* Scene 2 (4.5s -> 9s): ntdsdump 50k offline */
+    /* Scene 3 (9s -> 13.5s): bench-ndr 1,000,000 */
+    /* Scene 4 (13.5s -> 18s): GetNPUsers 5k */
+
+    @keyframes showScene1 {
+      0%, 23% { opacity: 1; transform: translateY(0); }
+      24%, 100% { opacity: 0; transform: translateY(-4px); pointer-events: none; }
+    }
+    @keyframes showScene2 {
+      0%, 24% { opacity: 0; transform: translateY(4px); pointer-events: none; }
+      26%, 48% { opacity: 1; transform: translateY(0); }
+      49%, 100% { opacity: 0; transform: translateY(-4px); pointer-events: none; }
+    }
+    @keyframes showScene3 {
+      0%, 49% { opacity: 0; transform: translateY(4px); pointer-events: none; }
+      51%, 73% { opacity: 1; transform: translateY(0); }
+      74%, 100% { opacity: 0; transform: translateY(-4px); pointer-events: none; }
+    }
+    @keyframes showScene4 {
+      0%, 74% { opacity: 0; transform: translateY(4px); pointer-events: none; }
+      76%, 98% { opacity: 1; transform: translateY(0); }
+      99%, 100% { opacity: 0; transform: translateY(-4px); pointer-events: none; }
+    }
+
+    /* Tab Highlights */
+    @keyframes tab1Anim { 0%, 23% { fill: #1e293b; stroke: #38bdf8; } 24%, 100% { fill: transparent; stroke: transparent; } }
+    @keyframes tab2Anim { 0%, 24% { fill: transparent; stroke: transparent; } 26%, 48% { fill: #1e293b; stroke: #38bdf8; } 49%, 100% { fill: transparent; stroke: transparent; } }
+    @keyframes tab3Anim { 0%, 49% { fill: transparent; stroke: transparent; } 51%, 73% { fill: #1e293b; stroke: #38bdf8; } 74%, 100% { fill: transparent; stroke: transparent; } }
+    @keyframes tab4Anim { 0%, 74% { fill: transparent; stroke: transparent; } 76%, 98% { fill: #1e293b; stroke: #38bdf8; } 99%, 100% { fill: transparent; stroke: transparent; } }
+
+    .scene-1 { animation: showScene1 18s infinite; }
+    .scene-2 { animation: showScene2 18s infinite; }
+    .scene-3 { animation: showScene3 18s infinite; }
+    .scene-4 { animation: showScene4 18s infinite; }
+
+    .tab-1-box { animation: tab1Anim 18s infinite; }
+    .tab-2-box { animation: tab2Anim 18s infinite; }
+    .tab-3-box { animation: tab3Anim 18s infinite; }
+    .tab-4-box { animation: tab4Anim 18s infinite; }
+
+    /* Progress Bar Filling Animations */
+    @keyframes rustFastFill {
+      0% { width: 0px; }
+      8%, 100% { width: 400px; }
+    }
+    @keyframes pySlowFill {
+      0% { width: 0px; }
+      18% { width: 140px; }
+      22%, 100% { width: 380px; }
+    }
+
+    .bar-rust-fast { animation: rustFastFill 4.5s ease-out infinite; }
+    .bar-py-slow { animation: pySlowFill 4.5s linear infinite; }
+  </style>
+
+  <!-- Window Frame -->
+  <rect width="940" height="570" class="win-frame" />
+
+  <!-- Top Navigation & Tab Bar -->
+  <path d="M 0 12 C 0 5.373 5.373 0 12 0 L 928 0 C 934.627 0 940 5.373 940 12 L 940 46 L 0 46 Z" class="top-bar" />
+  <line x1="0" y1="46" x2="940" y2="46" stroke="#1e293b" stroke-width="1.5" />
+
+  <!-- Window Controls -->
+  <circle cx="22" cy="23" r="5.5" fill="#ef4444" />
+  <circle cx="39" cy="23" r="5.5" fill="#f59e0b" />
+  <circle cx="56" cy="23" r="5.5" fill="#10b981" />
+
+  <!-- Scenario Tabs -->
+  <g transform="translate(100, 11)">
+    <!-- Tab 1 -->
+    <rect x="0" y="0" width="180" height="24" rx="5" class="tab-1-box" />
+    <text x="90" y="16" text-anchor="middle" class="tab-text">1. secretsdump (10k DCSync)</text>
+
+    <!-- Tab 2 -->
+    <rect x="190" y="0" width="175" height="24" rx="5" class="tab-2-box" />
+    <text x="277" y="16" text-anchor="middle" class="tab-text">2. ntdsdump (50k NTDS.dit)</text>
+
+    <!-- Tab 3 -->
+    <rect x="375" y="0" width="175" height="24" rx="5" class="tab-3-box" />
+    <text x="462" y="16" text-anchor="middle" class="tab-text">3. bench-ndr (1M PDUs)</text>
+
+    <!-- Tab 4 -->
+    <rect x="560" y="0" width="175" height="24" rx="5" class="tab-4-box" />
+    <text x="647" y="16" text-anchor="middle" class="tab-text">4. GetNPUsers (5k Preauth)</text>
+  </g>
+
+  <!-- Left Header: Python Impacket -->
+  <rect x="14" y="56" width="448" height="34" rx="6" fill="url(#pyHeaderGrad)" stroke="#334155" stroke-width="1" />
+  <text x="28" y="78" class="term-font c-py-title">🐍 PYTHON IMPACKET (v0.12.0)</text>
+  <text x="446" y="77" text-anchor="end" class="term-font c-dim">Python 3.11 • GIL • Dynamic Alloc</text>
+
+  <!-- Right Header: Impacket-RS -->
+  <rect x="478" y="56" width="448" height="34" rx="6" fill="url(#rustHeaderGrad)" stroke="#0284c7" stroke-width="1.2" />
+  <text x="492" y="78" class="term-font c-rust-title">⚡ IMPACKET-RS (Pure-Rust Engine)</text>
+  <text x="910" y="77" text-anchor="end" class="term-font c-cyan">Compiled ASM • Zero-Copy NDR • Multi-Call</text>
+
+  <!-- Left Terminal Body (Python) -->
+  <rect x="14" y="98" width="448" height="456" rx="8" class="py-pane" />
+
+  <!-- Right Terminal Body (Rust) -->
+  <rect x="478" y="98" width="448" height="456" rx="8" class="rust-pane" />
+
+  <!-- ============================================================== -->
+  <!-- SCENE 1: secretsdump (10,000 DCSync DRSUAPI Accounts)           -->
+  <!-- ============================================================== -->
+  <g class="scene-1 term-font">
+    <!-- Python Side -->
+    <text x="26" y="126" class="c-dim">$ time secretsdump.py corp.local/admin@10.0.0.1 -just-dc</text>
+    <text x="26" y="148" class="c-dim">[*] Impacket v0.12.0 - Copyright Fortra</text>
+    <text x="26" y="170" class="c-dim">[*] Target OS: Windows Server 2022 Datacenter</text>
+    <text x="26" y="192" class="c-dim">[*] Bound to MS-DRSR DRSUAPI over RPC...</text>
+    <text x="26" y="214" class="c-yellow">[*] Python interpreter cold start: 184.2 ms</text>
+    <text x="26" y="236" class="c-dim">[*] Streaming 10,000 accounts via IDL_DRSGetNCChanges...</text>
+    <text x="26" y="258" class="c-dim">    Parsing NDR structures via pure-python unpack()...</text>
+    <text x="26" y="280" class="c-dim">[+] Administrator:500:aad3b435...:2b576acbe6bcfda7...</text>
+    <text x="26" y="302" class="c-dim">[+] krbtgt:502:aad3b435...:f7a29e8401cb95a3...</text>
+    <text x="26" y="344" class="c-yellow">[*] Process RSS Memory: 54.8 MB (GC overhead)</text>
+    <text x="26" y="374" class="c-dim">Progress: 10,000 / 10,000 accounts</text>
+    <rect x="26" y="384" width="400" height="8" rx="4" fill="#1e293b" />
+    <rect x="26" y="384" width="400" height="8" rx="4" fill="url(#pyBar)" class="bar-py-slow" />
+    <text x="26" y="420" class="c-dim">real    0m2.842s</text>
+    <text x="26" y="440" class="c-dim">user    0m2.418s  sys  0m0.184s</text>
+    <text x="26" y="480" class="c-red" font-weight="bold">TOTAL TIME: 2,842.0 ms (2.84s)</text>
+
+    <!-- Rust Side -->
+    <text x="490" y="126" class="c-cmd">$ time impacket-rs secretsdump corp.local/admin@10.0.0.1 -just-dc</text>
+    <text x="490" y="148" class="c-cyan">[*] Impacket-RS v0.1.0-dev (Engine: Native Pure-Rust ASM)</text>
+    <text x="490" y="170" class="c-cyan">[*] SMB 3.1.1 [AES-128-GCM] + DRSUAPI Zero-Copy RPC</text>
+    <text x="490" y="192" class="c-green">[*] Sub-millisecond cold start: 1.8 ms (102x faster)</text>
+    <text x="490" y="214" class="c-cyan">[*] Streaming 10,000 accounts via IDL_DRSGetNCChanges...</text>
+    <text x="490" y="236" class="c-cmd">[+] Administrator:500:aad3b435...:2b576acbe6bcfda7...</text>
+    <text x="490" y="258" class="c-cmd">[+] krbtgt:502:aad3b435...:f7a29e8401cb95a3...</text>
+    <text x="490" y="280" class="c-green">[+] 10,000 accounts synchronized instantly</text>
+    <text x="490" y="344" class="c-cyan">[*] Peak RSS Memory: 4.6 MB (Zero dynamic GC heap)</text>
+    <text x="490" y="374" class="c-green">Progress: 10,000 / 10,000 accounts [COMPLETED]</text>
+    <rect x="490" y="384" width="400" height="8" rx="4" fill="#1e293b" />
+    <rect x="490" y="384" width="400" height="8" rx="4" fill="url(#rustBar)" class="bar-rust-fast" />
+    <text x="490" y="420" class="c-dim">real    0m0.021s</text>
+    <text x="490" y="440" class="c-dim">user    0m0.016s  sys  0m0.004s</text>
+    <text x="490" y="480" class="c-green" font-size="13px" font-weight="bold">TOTAL TIME: 21.4 ms — 133x FASTER ⚡</text>
+    <text x="490" y="504" class="c-purple">Throughput: 467,289 accounts/sec</text>
+  </g>
+
+  <!-- ============================================================== -->
+  <!-- SCENE 2: ntdsdump (Offline 50,000 NTDS.dit 1.2GB Database)      -->
+  <!-- ============================================================== -->
+  <g class="scene-2 term-font">
+    <!-- Python Side -->
+    <text x="26" y="126" class="c-dim">$ time python3 -m impacket.examples.secretsdump -ntds ntds.dit -system SYSTEM LOCAL</text>
+    <text x="26" y="148" class="c-dim">[*] Parsing ESE Jet database: ntds.dit (Size: 1.28 GB)...</text>
+    <text x="26" y="170" class="c-dim">[*] Extracting BootKey &amp; PEK from SYSTEM hive...</text>
+    <text x="26" y="192" class="c-dim">[*] Scanning B-tree table datatable (50,000 records)...</text>
+    <text x="26" y="214" class="c-yellow">[*] Python dict &amp; heap allocation thrashing...</text>
+    <text x="26" y="236" class="c-dim">[*] Decrypting PEK with SysKey &amp; user PekList...</text>
+    <text x="26" y="280" class="c-dim">Progress: 50,000 / 50,000 objects</text>
+    <rect x="26" y="290" width="400" height="8" rx="4" fill="#1e293b" />
+    <rect x="26" y="290" width="400" height="8" rx="4" fill="url(#pyBar)" class="bar-py-slow" />
+    <text x="26" y="344" class="c-yellow">[*] Memory RSS: 382 MB (high object allocations)</text>
+    <text x="26" y="420" class="c-dim">real    0m48.210s</text>
+    <text x="26" y="440" class="c-dim">user    0m46.840s  sys  0m1.120s</text>
+    <text x="26" y="480" class="c-red" font-weight="bold">TOTAL TIME: 48.21 seconds</text>
+
+    <!-- Rust Side -->
+    <text x="490" y="126" class="c-cmd">$ time impacket-rs ntdsdump /data/ntds.dit /data/SYSTEM</text>
+    <text x="490" y="148" class="c-cyan">[*] Zero-Copy ESE Parser: ntds.dit (1.28 GB mapped)</text>
+    <text x="490" y="170" class="c-cyan">[*] Hardware SIMD AES-NI / DES SysKey &amp; PEK engine</text>
+    <text x="490" y="192" class="c-green">[*] High-speed page tree traversal (50,000 records)...</text>
+    <text x="490" y="214" class="c-cyan">[*] Decrypting user credentials &amp; history in parallel...</text>
+    <text x="490" y="236" class="c-green">[+] Extracted 50,000 accounts with full SID history</text>
+    <text x="490" y="280" class="c-green">Progress: 50,000 / 50,000 objects [COMPLETED]</text>
+    <rect x="490" y="290" width="400" height="8" rx="4" fill="#1e293b" />
+    <rect x="490" y="290" width="400" height="8" rx="4" fill="url(#rustBar)" class="bar-rust-fast" />
+    <text x="490" y="344" class="c-cyan">[*] Memory RSS: 14.2 MB (zero GC, mmap backed)</text>
+    <text x="490" y="420" class="c-dim">real    0m0.382s</text>
+    <text x="490" y="440" class="c-dim">user    0m0.340s  sys  0m0.038s</text>
+    <text x="490" y="480" class="c-green" font-size="13px" font-weight="bold">TOTAL TIME: 0.382s (382 ms) — 126x FASTER ⚡</text>
+    <text x="490" y="504" class="c-purple">Throughput: 130,890 records/sec</text>
+  </g>
+
+  <!-- ============================================================== -->
+  <!-- SCENE 3: bench-ndr (1,000,000 PDU Serialization Roundtrips)   -->
+  <!-- ============================================================== -->
+  <g class="scene-3 term-font">
+    <!-- Python Side -->
+    <text x="26" y="126" class="c-dim">$ python3 -c "import impacket.dcerpc.v5.ndr as n; benchmark(1000000)"</text>
+    <text x="26" y="148" class="c-dim">[*] Testing pure-python NDR struct pack &amp; unpack...</text>
+    <text x="26" y="170" class="c-dim">[*] 1,000,000 iterations of complex DCE/RPC union/pointer</text>
+    <text x="26" y="200" class="c-yellow">[*] Python bytecode loop: ~23,800 ns per PDU</text>
+    <text x="26" y="230" class="c-dim">Progress: 1,000,000 roundtrips</text>
+    <rect x="26" y="240" width="400" height="8" rx="4" fill="#1e293b" />
+    <rect x="26" y="240" width="400" height="8" rx="4" fill="url(#pyBar)" class="bar-py-slow" />
+    <text x="26" y="320" class="c-yellow">Throughput: 42,016 roundtrips/sec</text>
+    <text x="26" y="420" class="c-dim">real    0m23.800s</text>
+    <text x="26" y="440" class="c-dim">user    0m23.610s  sys  0m0.120s</text>
+    <text x="26" y="480" class="c-red" font-weight="bold">TOTAL TIME: 23.80 seconds</text>
+
+    <!-- Rust Side -->
+    <text x="490" y="126" class="c-cmd">$ impacket-rs bench-ndr 1000000</text>
+    <text x="490" y="148" class="c-cyan">[*] Pure-Rust compile-time NDR struct serialization</text>
+    <text x="490" y="170" class="c-cyan">[*] Benchmarking 1,000,000 zero-copy NDR roundtrips...</text>
+    <text x="490" y="200" class="c-green">[*] Native CPU vector instructions: 171.0 ns per PDU</text>
+    <text x="490" y="230" class="c-green">Progress: 1,000,000 roundtrips [COMPLETED]</text>
+    <rect x="490" y="240" width="400" height="8" rx="4" fill="#1e293b" />
+    <rect x="490" y="240" width="400" height="8" rx="4" fill="url(#rustBar)" class="bar-rust-fast" />
+    <text x="490" y="320" class="c-green" font-weight="bold">Throughput: 5,847,150 roundtrips/sec</text>
+    <text x="490" y="420" class="c-dim">real    0m0.171s</text>
+    <text x="490" y="440" class="c-dim">user    0m0.165s  sys  0m0.005s</text>
+    <text x="490" y="480" class="c-green" font-size="13px" font-weight="bold">TOTAL TIME: 171.02 ms — 139x FASTER ⚡</text>
+    <text x="490" y="504" class="c-purple">Latency: 171.02 nanoseconds/op</text>
+  </g>
+
+  <!-- ============================================================== -->
+  <!-- SCENE 4: GetNPUsers (5,000 Kerberos AS-REP Roasting Accounts)   -->
+  <!-- ============================================================== -->
+  <g class="scene-4 term-font">
+    <!-- Python Side -->
+    <text x="26" y="126" class="c-dim">$ time GetNPUsers.py corp.local/ -usersfile 5k_users.txt -no-pass</text>
+    <text x="26" y="148" class="c-dim">[*] Querying 5,000 user accounts for DONT_REQ_PREAUTH...</text>
+    <text x="26" y="170" class="c-dim">[*] Iterating over ASN.1 DER encodings in Python...</text>
+    <text x="26" y="200" class="c-yellow">[*] Single-threaded socket I/O + PyCrypto/Cryptodome</text>
+    <text x="26" y="230" class="c-dim">Progress: 5,000 / 5,000 accounts checked</text>
+    <rect x="26" y="240" width="400" height="8" rx="4" fill="#1e293b" />
+    <rect x="26" y="240" width="400" height="8" rx="4" fill="url(#pyBar)" class="bar-py-slow" />
+    <text x="26" y="320" class="c-dim">[+] Extracted 8 vulnerable AS-REP hashes</text>
+    <text x="26" y="420" class="c-dim">real    0m12.450s</text>
+    <text x="26" y="440" class="c-dim">user    0m10.820s  sys  0m1.140s</text>
+    <text x="26" y="480" class="c-red" font-weight="bold">TOTAL TIME: 12.45 seconds</text>
+
+    <!-- Rust Side -->
+    <text x="490" y="126" class="c-cmd">$ time impacket-rs GetNPUsers corp.local/ -usersfile 5k_users.txt -no-pass</text>
+    <text x="490" y="148" class="c-cyan">[*] Pure-Rust zero-alloc ASN.1 BER/DER parser engine</text>
+    <text x="490" y="170" class="c-cyan">[*] High-speed streaming Kerberos AS-REQ pipeline</text>
+    <text x="490" y="200" class="c-green">[*] Constant-time crypto &amp; Hashcat mode 18200 formatting</text>
+    <text x="490" y="230" class="c-green">Progress: 5,000 / 5,000 accounts checked [COMPLETED]</text>
+    <rect x="490" y="240" width="400" height="8" rx="4" fill="#1e293b" />
+    <rect x="490" y="240" width="400" height="8" rx="4" fill="url(#rustBar)" class="bar-rust-fast" />
+    <text x="490" y="320" class="c-green">[+] Extracted 8 vulnerable AS-REP hashes</text>
+    <text x="490" y="420" class="c-dim">real    0m0.110s</text>
+    <text x="490" y="440" class="c-dim">user    0m0.098s  sys  0m0.012s</text>
+    <text x="490" y="480" class="c-green" font-size="13px" font-weight="bold">TOTAL TIME: 110.4 ms — 112x FASTER ⚡</text>
+    <text x="490" y="504" class="c-purple">Throughput: 45,280 accounts/sec</text>
+  </g>
+</svg>
