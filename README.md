@@ -15,7 +15,7 @@
   <img src="https://img.shields.io/badge/rust-1.75%2B%20(2021)-orange.svg" alt="Rust 2021 Edition"/>
   <img src="https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-brightgreen.svg" alt="Platform"/>
   <img src="https://img.shields.io/badge/arch-x86__64%20%7C%20aarch64-blueviolet.svg" alt="Architecture"/>
-  <img src="https://img.shields.io/badge/parity-100%25%20(70%2F70%20tools)-success.svg" alt="Parity"/>
+  <img src="https://img.shields.io/badge/parity-100%25%20(74%2F74%20tools)-success.svg" alt="Parity"/>
 </p>
 
 ---
@@ -25,7 +25,7 @@
 **Impacket-RS** is a modern, memory-safe, ground-up rewrite of the industry-standard [SecureAuth Impacket](https://github.com/fortra/impacket) toolkit in pure Rust. Built for security researchers, penetration testers, red teams, and system administrators, it brings **blazing speed, sub-millisecond cold starts, zero interpreter overhead, and complete compile-time memory safety** to low-level Windows network protocol manipulation.
 
 ### Key Highlights
-- **100% Upstream Parity**: 70 CLI subcommands covering remote execution (`psexec`, `wmiexec`, `smbexec`, `atexec`), credential dumping (`secretsdump`, `ntdsdump`, `dpapi`), Kerberos attacks & armoring (`GetNPUsers`, `GetUserSPNs`, `getTGT`, `getST`, `ticketer` Golden/Silver/Diamond), Active Directory administration (`ldapclient`, `GetADUsers`, `dnstool`, `GetLAPSPassword`), relaying (`ntlmrelayx`), packet dissection (`sniffer`), and network auditing (`rdp_check`, `mqtt_check`, `tracer`).
+- **100% Upstream Parity**: 74 CLI subcommands covering remote execution (`psexec`, `wmiexec`, `smbexec`, `atexec`), credential dumping (`secretsdump`, `ntdsdump`, `dpapi`), Kerberos attacks & armoring (`GetNPUsers`, `GetUserSPNs`, `getTGT`, `getST`, `raiseChild`, `ticketer` Golden/Silver/Diamond), Active Directory administration (`ldapclient`, `GetADUsers`, `trueTree`, `dnstool`, `GetLAPSPassword`), relaying (`ntlmrelayx`), packet dissection (`sniffer`), and network auditing (`rdp_check`, `mqtt_check`, `tracer`).
 - **Sub-Millisecond Cold Starts**: Starts in **< 2ms** compared to 150-250ms for Python Impacket, making it ideal for massive orchestrations and fast pivoting.
 - **5.85 Million Wire Roundtrips/sec**: Zero-allocation NDR marshaling and compile-time layout verification yield up to **60x to 100x speedups** over pure-Python encoders.
 - **Pure-Rust Cryptographic Engine**: Independent, constant-time implementations of RC4, DES, 3DES, AES-128/256 (CBC/CTS/GCM/CCM), MD4, MD5, SHA-1, SHA-256, SHA-512, HMAC, PBKDF2, CMAC, and Kerberos n-fold.
@@ -208,7 +208,7 @@ cargo build --release --target aarch64-pc-windows-msvc
 
 ---
 
-## Tool Catalog (70 Subcommands)
+## Tool Catalog (74 Subcommands)
 
 `impacket-rs` is a single multi-call binary. You can invoke tools directly or symlink any tool name to the binary:
 
@@ -240,6 +240,7 @@ cargo build --release --target aarch64-pc-windows-msvc
 | `GetUserSPNs` | Kerberoasting SPN discovery and TGS request collector (Hashcat / JtR format) |
 | `getTGT` | Request Kerberos Ticket-Granting Tickets via RC4/AES pre-auth or PKINIT |
 | `getST` | Request Service Tickets via TGS-REQ, S4U2self, S4U2proxy, or U2U |
+| `raiseChild` | Child-to-parent domain forest root escalation ticket generator (ExtraSids) |
 | `ticketer` | Forge Kerberos Golden, Silver, and Diamond tickets |
 | `describeTicket` | Deep ASN.1 inspection of `.ccache` and `.kirbi` tickets |
 | `ticketConverter` | Bidirectional converter between Linux MIT `.ccache` and Windows `.kirbi` |
@@ -254,6 +255,7 @@ cargo build --release --target aarch64-pc-windows-msvc
 | `GetADComputers` | Enumerate Active Directory computer accounts and operating systems |
 | `GetLAPSPassword` | Query legacy LAPS (`ms-Mcs-AdmPwd`) and Windows LAPS passwords |
 | `CheckLDAPStatus` | Audit LDAP RootDSE, supported capabilities, and channel binding enforcement |
+| `trueTree` | Discover Active Directory domain trust relationships & forest hierarchy |
 | `dnstool` | Active Directory Integrated DNS management (`[MS-DNSP]`) |
 | `dfsclient` | Distributed File System namespace & referral manager (`[MS-DFSNM]`) |
 | `dacledit` | Inspect or modify Active Directory object DACL permissions |
@@ -267,6 +269,7 @@ cargo build --release --target aarch64-pc-windows-msvc
 | Subcommand | Description |
 | :--- | :--- |
 | `smbclient` | Interactive SMB2/3 shell and batch script runner (`-batch`, `-c`) |
+| `smbpasswd` | Remote user password modification via MS-SAMR over SMB |
 | `smbserver` | Pure-Rust SMB2 file/IPC server and NetNTLMv2 credential sniffer |
 | `mssqlclient` | Microsoft SQL Server client with Windows NTLM, SQL auth, and `xp_cmdshell` |
 | `mssqlinstance` | Discover SQL Server instances, clustered setups, and ports via `[MC-SQLR]` |
@@ -293,6 +296,7 @@ cargo build --release --target aarch64-pc-windows-msvc
 | `machine_role` | Workstation/server domain join status and OS version prober |
 | `attrib` | Query and modify remote SMB file attributes (`READONLY`, `HIDDEN`, `SYSTEM`) |
 | `filetime` | Convert between FileTime integers and ISO 8601 or touch remote timestamps |
+| `split` | Split large databases, wordlists, or dump files into chunks |
 | `ntlmrelayx` | Cross-protocol NTLM relay engine (HTTP/SMB/LDAP/MSSQL) with `-tf` routing |
 
 ---
@@ -316,7 +320,7 @@ impacket-rs/
 │   ├── impacket-mssql      # TDS 7.x/8.0 parser, MC-SQLR resolution, mssqlclient engine
 │   └── impacket-relay      # NTLM cross-protocol relay engine & session state machine
 └── bins/
-    └── impacket-rs         # Unified multi-call CLI binary (all 70 tools)
+    └── impacket-rs         # Unified multi-call CLI binary (all 74 tools)
 ```
 
 ---
