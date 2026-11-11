@@ -34,6 +34,7 @@ This project follows **Semantic Versioning 2.0.0 (SemVer)** and the exact change
         * Redesigned vector logo (`assets/logo.svg`, `.github/assets/logo.svg`) with expanded viewBox (`640x120`) eliminating right-edge text truncation.
         * Engineered interactive 5-scenario side-by-side terminal comparison SVG (`assets/comparison-demo.svg`) with strict `<clipPath>` pane isolation and synchronized stress-test benchmarks.
         * Published comprehensive command reference (`docs/COMMAND_REFERENCE.md`) documenting full syntax and usage examples for all 74 tools.
+        * Added clean crypto donation endpoints (USDT-TRC20 and BTC-BSC) in `README.md`.
 
     * **Group 4 & Phase 8 Enhancements (`bins/impacket-rs`, `crates/impacket-relay`, `crates/impacket-smb`)**:
         * **WMI Event Subscription & Persistence Manager (`wmipersist`, `bins/impacket-rs`)**:

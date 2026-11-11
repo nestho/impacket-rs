@@ -365,6 +365,17 @@ impacket-rs/
 
 ---
 
+## Support & Donate
+
+If you find `impacket-rs` useful for your research, assessments, or tooling, consider supporting continuous protocol development:
+
+| Asset / Network | Deposit Address |
+| :--- | :--- |
+| ![USDT TRC20](https://img.shields.io/badge/USDT-TRC20-26A17B?style=for-the-badge&logo=tether&logoColor=white) | `TMJxBhwpMMs57iskAjN7vQKcRQGijv8BJh` |
+| ![BTC BSC](https://img.shields.io/badge/BTC-BSC%20(BEP20)-F3BA2F?style=for-the-badge&logo=binance&logoColor=black) | `0x2e2f475ef35fab2efed3e99c937068762d34de0d` |
+
+---
+
 ## License
 
 This project is licensed under the **Apache License 2.0** - see the [LICENSE](LICENSE) file for details.
