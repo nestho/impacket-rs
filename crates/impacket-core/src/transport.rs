@@ -219,17 +219,23 @@ impl TransportStream {
         timeout: Duration,
     ) -> Result<Self, CoreError> {
         let host = spec.effective_target_ip();
+        let port = spec.effective_port(default_port);
         let proxy = spec.proxy.as_ref();
-        Self::connect(host, default_port, timeout, proxy)
+        Self::connect(host, port, timeout, proxy)
     }
 
-    /// Direct TCP connection without proxy.
+    /// Direct TCP connection without proxy, supporting IPv4 and IPv6 dual-stack resolution.
     fn connect_direct(
         target_host: &str,
         target_port: u16,
         timeout: Duration,
     ) -> Result<Self, CoreError> {
-        let addr_str = format!("{}:{}", target_host, target_port);
+        let clean_host = target_host.trim_start_matches('[').trim_end_matches(']');
+        let addr_str = if clean_host.contains(':') {
+            format!("[{}]:{}", clean_host, target_port)
+        } else {
+            format!("{}:{}", clean_host, target_port)
+        };
         let addrs = addr_str.to_socket_addrs().map_err(|e| {
             CoreError::IoError(format!("Failed to resolve target '{}': {}", addr_str, e))
         })?;
@@ -267,7 +273,12 @@ impl TransportStream {
         timeout: Duration,
         proxy: &ProxyConfig,
     ) -> Result<Self, CoreError> {
-        let proxy_addr_str = format!("{}:{}", proxy.host, proxy.port);
+        let clean_proxy_host = proxy.host.trim_start_matches('[').trim_end_matches(']');
+        let proxy_addr_str = if clean_proxy_host.contains(':') {
+            format!("[{}]:{}", clean_proxy_host, proxy.port)
+        } else {
+            format!("{}:{}", clean_proxy_host, proxy.port)
+        };
         let proxy_addrs = proxy_addr_str.to_socket_addrs().map_err(|e| {
             CoreError::ProxyError(format!(
                 "Failed to resolve proxy server '{}': {}",
@@ -485,15 +496,16 @@ fn socks5_handshake(
     req.push(0x00); // Reserved
 
     // Determine address type
-    if let Ok(ipv4) = target_host.parse::<Ipv4Addr>() {
+    let clean_target = target_host.trim_start_matches('[').trim_end_matches(']');
+    if let Ok(ipv4) = clean_target.parse::<Ipv4Addr>() {
         req.push(0x01); // ATYP: IPv4
         req.extend_from_slice(&ipv4.octets());
-    } else if let Ok(ipv6) = target_host.parse::<Ipv6Addr>() {
+    } else if let Ok(ipv6) = clean_target.parse::<Ipv6Addr>() {
         req.push(0x04); // ATYP: IPv6
         req.extend_from_slice(&ipv6.octets());
     } else {
         // Domain Name (ATYP: 0x03) - resolves remotely on proxy to prevent DNS leaks!
-        let host_bytes = target_host.as_bytes();
+        let host_bytes = clean_target.as_bytes();
         if host_bytes.len() > 255 {
             return Err(CoreError::ProxyError(
                 "Target hostname exceeds maximum SOCKS5 length (255 bytes)".into(),
@@ -593,9 +605,15 @@ fn http_connect_handshake(
     target_port: u16,
     auth: Option<&ProxyAuth>,
 ) -> Result<(), CoreError> {
+    let clean_target = target_host.trim_start_matches('[').trim_end_matches(']');
+    let host_header = if clean_target.contains(':') {
+        format!("[{}]:{}", clean_target, target_port)
+    } else {
+        format!("{}:{}", clean_target, target_port)
+    };
     let mut req = format!(
-        "CONNECT {}:{} HTTP/1.1\r\nHost: {}:{}\r\nUser-Agent: impacket-rs\r\nProxy-Connection: Keep-Alive\r\n",
-        target_host, target_port, target_host, target_port
+        "CONNECT {} HTTP/1.1\r\nHost: {}\r\nUser-Agent: impacket-rs\r\nProxy-Connection: Keep-Alive\r\n",
+        host_header, host_header
     );
 
     if let Some(credentials) = auth {

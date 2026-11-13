@@ -168,6 +168,11 @@ fn print_usage() {
     println!("  smb-negotiate [legacy|auto|modern]                   Build SMBv1/SMB2/SMB3.1.1 Negotiate PDUs");
     println!("  rpc-interfaces                                       Inspect MSRPC interface catalog & SAMR Bind PDU");
     println!("  bench-ndr [ITERATIONS]                               Benchmark compile-time NDR marshaling throughput");
+    println!();
+    println!("GLOBAL OPTIONS (applicable across all network tools):");
+    println!("  -proxy <URL>, --proxy <URL>   Route traffic through SOCKS5 (socks5://host:port) or HTTP (http://host:port) proxy");
+    println!("                                (auto-detected from ALL_PROXY, HTTPS_PROXY, HTTP_PROXY environment variables)");
+    println!("  --compat <PROFILE>            Active Directory dialect: legacy (Win2000), auto (universal), modern (Win2025)");
 }
 
 fn parse_compat_flag(args: &[String]) -> AdCompatProfile {
@@ -3226,6 +3231,7 @@ fn cmd_netview(args: &[String]) {
             username: String::new(),
             password: None,
             remote_name: String::new(),
+            target_port: None,
             dc_ip: None,
             target_ip: None,
             use_kerberos: false,

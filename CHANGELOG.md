@@ -21,6 +21,29 @@ This project follows **Semantic Versioning 2.0.0 (SemVer)** and the exact change
 
 ---
 
+## [Unreleased]
+
+1. Library & Protocol Improvements
+
+    * **Pure-Rust In-Core SOCKS5 & HTTP CONNECT Proxy Engine (`crates/impacket-core::transport`)**:
+        * Added `TransportStream` abstraction supporting direct TCP, SOCKS5 (RFC 1928 / RFC 1929), and HTTP `CONNECT` (RFC 7231) proxy tunneling without external C or runtime dependencies.
+        * Eliminates `proxychains4` runtime dependency and resolves `LD_PRELOAD` failures on statically linked `musl` binaries.
+        * Added `ProxyConfig` supporting `socks5://[user:pass@]host[:port]`, `socks5h://`, and `http://[user:pass@]host[:port]` URL formats.
+        * Added automatic proxy auto-discovery from environment variables (`ALL_PROXY`, `all_proxy`, `HTTPS_PROXY`, `https_proxy`, `HTTP_PROXY`, `http_proxy`).
+        * Implemented remote SOCKS5 DNS resolution (ATYP `0x03`) to eliminate operator DNS leakage during assessments.
+    * **Full IPv6 Dual-Stack Support (`crates/impacket-core`, `bins/impacket-rs`)**:
+        * Added native IPv6 parsing support for bracketed targets (`[fe80::1]`, `[2001:db8::1]:445`) and unbracketed targets in `TargetSpec`.
+        * Added dual-stack connection fallback in `TransportStream::connect_direct` resolving both IPv6 and IPv4 addresses.
+        * Added `target_port` and `effective_port` helpers to `TargetSpec`.
+    * **Global CLI Flag & Help Engine Integration (`bins/impacket-rs`)**:
+        * Added `-proxy` and `--proxy <URL>` flag parsing to `parse_target_with_hashes` across all 74 subcommands.
+        * Enriched `print_tool_help` in `bins/impacket-rs/src/help.rs` with `global connection options:` documenting proxy tunneling and `--compat` for all 74 tools.
+        * Enriched `print_usage` in `bins/impacket-rs/src/main.rs` with global options documentation.
+    * **Developer Library Example**:
+        * Added `bins/impacket-rs/examples/transport_proxy.rs` demonstrating `TransportStream`, `ProxyConfig`, and in-process mock SOCKS5 proxy verification.
+
+---
+
 ## [v0.1.1] - 2026-11-13
 
 1. Library & CLI Improvements

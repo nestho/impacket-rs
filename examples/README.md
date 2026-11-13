@@ -10,6 +10,7 @@ Standalone examples showing how to use `impacket-rs` modular crates as native Ru
 | [`ndr_serialization.rs`](file:///Users/nestho/impacket-rs/bins/impacket-rs/examples/ndr_serialization.rs) | Fast compile-time NDR DCE/RPC struct serialization & deserialization | `cargo run -p impacket-rs --example ndr_serialization` |
 | [`krb5_ccache.rs`](file:///Users/nestho/impacket-rs/bins/impacket-rs/examples/krb5_ccache.rs) | Kerberos CCache / Kirbi ticket inspector, converter & parser | `cargo run -p impacket-rs --example krb5_ccache -- ticket.ccache` |
 | [`ntlm_auth_handshake.rs`](file:///Users/nestho/impacket-rs/bins/impacket-rs/examples/ntlm_auth_handshake.rs) | Complete in-memory NTLMv2 3-way handshake & NetNTLMv2 hash generation | `cargo run -p impacket-rs --example ntlm_auth_handshake` |
+| [`transport_proxy.rs`](file:///Users/nestho/impacket-rs/bins/impacket-rs/examples/transport_proxy.rs) | SOCKS5 & HTTP CONNECT proxy tunneling and IPv6 dual-stack sockets | `cargo run -p impacket-rs --example transport_proxy` |
 
 ---
 
