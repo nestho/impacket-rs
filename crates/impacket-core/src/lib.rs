@@ -1,6 +1,6 @@
 //! `impacket-core`: Foundational types, memory-safe credential wrappers,
 //! classic Impacket target specification parser (`[[domain/]username[:password]@]<target>`),
-//! cross-era Active Directory compatibility profiles (`AdCompatProfile`: Win2000 -> Win2025),
+//! cross-era Active Directory compatibility profiles (`AdCompatProfile`: Windows 2000 through Server 2025),
 //! standard SemVer version/banner module (`impacket/version.py`),
 //! Windows `FileTime` converter, NTSTATUS error catalog, and UTF-16LE / hexdump utilities.
 
@@ -18,7 +18,7 @@ pub mod version {
     pub const BANNER: &str = concat!(
         "Impacket-RS v",
         env!("CARGO_PKG_VERSION"),
-        " - High-Performance Rust Network Protocol Toolkit (Win2000 -> Win2025)\n"
+        " - High-Performance Active Directory & Protocol Toolkit\n"
     );
 }
 
@@ -80,7 +80,7 @@ impl AdCompatProfile {
     pub const fn name(self) -> &'static str {
         match self {
             Self::LegacyWin2000 => "Legacy (Win2000/2003/XP - SMBv1/NTLMv1/RC4+DES)",
-            Self::UniversalAuto => "Universal Auto (Win2000 -> Win2025 Adaptive)",
+            Self::UniversalAuto => "Universal Auto (Adaptive Windows 2000 - Server 2025)",
             Self::ModernHardened2025 => "Modern Hardened (Win2022/2025 - SMB3.1.1/AES/EPA/Privacy)",
         }
     }
@@ -641,6 +641,6 @@ mod tests {
         assert!(AdCompatProfile::LegacyWin2000.allows_ntlmv1());
         assert!(!AdCompatProfile::UniversalAuto.allows_ntlmv1());
         assert!(AdCompatProfile::ModernHardened2025.requires_epa_channel_binding());
-        assert!(version::BANNER.contains("Impacket-RS v0.1.0"));
+        assert!(version::BANNER.contains("Impacket-RS v0.1.0 - High-Performance Active Directory & Protocol Toolkit"));
     }
 }

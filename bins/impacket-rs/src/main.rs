@@ -11,6 +11,8 @@
 //! Local diagnostics: `compat-matrix`, `parse-target`, `ntlm-hash`, `krb5-asreq`, `smb-negotiate`,
 //! `rpc-interfaces`, `bench-ndr`.
 
+mod help;
+
 use impacket_auth::{
     compute_ntlm_hashes_with_compat, compute_ntlmv1_response, compute_ntlmv2_response,
 };
@@ -159,7 +161,7 @@ fn print_usage() {
     println!("  ntlmrelayx -t <TARGET>|-tf <FILE> [-proto http|smb]  NTLM cross-protocol relay engine (HTTP/SMB/LDAP/MSSQL)");
     println!();
     println!("LOCAL DIAGNOSTIC SUBCOMMANDS:");
-    println!("  compat-matrix                                        Show Win2000 -> Win2025 AD compatibility profiles");
+    println!("  compat-matrix                                        Show Active Directory compatibility profiles (Windows 2000 - Server 2025)");
     println!("  parse-target <TARGET> [-hashes LM:NT]                Parse Impacket [[domain/]user[:pass]@]<host> spec");
     println!("  ntlm-hash <PASSWORD> [--legacy-lm]                   Compute LM/NT hashes, NTLMv1/ESS & NTLMv2 responses");
     println!("  krb5-asreq <REALM> <USER> [legacy|auto|modern]       Build RFC 4120 Kerberos AS-REQ PDU");
@@ -5107,7 +5109,7 @@ fn cmd_oxidquery(args: &[String]) {
 
 fn cmd_compat_matrix() {
     print!("{}", version::BANNER);
-    println!("=== Cross-Era Active Directory Compatibility Profiles (Win2000 -> Win2025) ===");
+    println!("=== Cross-Era Active Directory Compatibility Profiles (Windows 2000 - Server 2025) ===");
     for profile in [
         AdCompatProfile::LegacyWin2000,
         AdCompatProfile::UniversalAuto,
@@ -11307,6 +11309,26 @@ fn main() {
     } else {
         all_args.into_iter().skip(1).collect()
     };
+
+    if args.is_empty() {
+        print_usage();
+        return;
+    }
+
+    let first = args[0].as_str();
+    if first == "-h" || first == "--help" || first == "-help" || first == "help" {
+        if args.len() > 1 {
+            help::print_tool_help(&args[1]);
+        } else {
+            print_usage();
+        }
+        return;
+    }
+
+    if args.len() > 1 && args[1..].iter().any(|a| a == "-h" || a == "--help" || a == "-help") {
+        help::print_tool_help(first);
+        return;
+    }
 
     match args.first().map(|s| s.as_str()) {
         Some("DumpNTLMInfo") | Some("dump-ntlm-info") => cmd_dump_ntlm_info(&args[1..]),

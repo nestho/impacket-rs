@@ -25,6 +25,12 @@ This project follows **Semantic Versioning 2.0.0 (SemVer)** and the exact change
 
 1. Library improvements
 
+    * **Comprehensive Python-Impacket-Style Help System (`bins/impacket-rs/src/help.rs`, closes #1)**:
+        * Implemented descriptive `-h`, `--help`, and `impacket-rs help <tool>` messages matching the original Python Impacket documentation across all 74 tools.
+        * Documented full tool descriptions, positional argument syntax, authentication options (`-hashes`, `-no-pass`, `-k`, `-aesKey`, `-dc-ip`, `-target-ip`), connection flags, and copy-pasteable real-world examples for every utility.
+        * Supported multi-call execution (`impacket-rs <tool> -h`) and direct symlink execution (`<tool> -h`).
+        * Added automated unit test suite verifying help coverage, argument formatting, and aliases.
+
     * **Enterprise CI/CD, Security Audit & SonarCloud Quality Gate (`.github/workflows/ci.yml`, `.github/workflows/release.yml`, `sonar-project.properties`)**:
         * Configured `sonar-project.properties` disabling YAML sensor (`sonar.yaml.file.suffixes=`), setting universal CPD duplication exemptions (`sonar.cpd.exclusions=**/*`), and adding exemptions for Cognitive Complexity (`rust:S3776`), function parameter limits (`rust:S107`), and workflow rules.
         * Refactored `ci.yml` and `release.yml` to rely on native `rustup` and built-in GitHub CLI (`gh release`), eliminating third-party action dependencies and resolving all SonarCloud dependency SHA warnings.
