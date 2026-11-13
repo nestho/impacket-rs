@@ -9,3 +9,5 @@ description = "Cross-era Windows SYSTEM BootKey recovery and SAM/NTDS hash decry
 impacket-core = { path = "../impacket-core" }
 impacket-crypto = { path = "../impacket-crypto" }
 impacket-ndr = { path = "../impacket-ndr" }
+impacket-dcerpc = { path = "../impacket-dcerpc" }
+impacket-msrpc = { path = "../impacket-msrpc" }

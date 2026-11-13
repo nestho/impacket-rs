@@ -7,7 +7,8 @@
 //! - Enumeration: `BaseRegEnumKey` (9), `BaseRegEnumValue` (10)
 //! - Hive export: `BaseRegSaveKey` (20)
 
-use crate::dtypes::{write_string_wchar_pointee, REFERENT_BASE};
+pub use crate::dtypes::REFERENT_BASE;
+use crate::dtypes::write_string_wchar_pointee;
 use impacket_core::{decode_utf16le, encode_utf16le, CoreError};
 use impacket_dcerpc::{extract_response_stub, RpcRequestPdu, RpcTransport};
 use impacket_ndr::{NdrReader, NdrWriter};
@@ -419,6 +420,77 @@ pub fn build_base_reg_save_key_stub(hkey: &RegHandle, filename: &str) -> Vec<u8>
     w.into_bytes()
 }
 
+/// Metadata returned by `BaseRegQueryInfoKey` (opnum 16).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RegKeyInfo {
+    pub class_name: String,
+    pub sub_keys: u32,
+    pub max_subkey_len: u32,
+    pub max_class_len: u32,
+    pub values: u32,
+    pub max_value_name_len: u32,
+    pub max_value_len: u32,
+    pub last_write_time: u64,
+}
+
+/// `BaseRegQueryInfoKey` (16): `hKey`, `lpClassIn` (empty RRP_UNICODE_STRING with allocated buffer).
+pub fn build_base_reg_query_info_key_stub(hkey: &RegHandle, class_buf_len: u32) -> Vec<u8> {
+    let mut w = NdrWriter::with_capacity(40);
+    w.write_fixed_array(hkey);
+    // lpClassIn: RRP_UNICODE_STRING with Length=0, MaximumLength=class_buf_len, Buffer referent
+    w.write_u16(0); // Length
+    w.write_u16(class_buf_len as u16); // MaximumLength
+    w.write_u32(REFERENT_BASE); // Buffer referent
+    // Deferred conformant+varying array for lpClassIn buffer (empty)
+    w.write_u32((class_buf_len / 2) as u32); // max_count (WCHARs)
+    w.write_u32(0); // offset
+    w.write_u32(0); // actual_count
+    w.into_bytes()
+}
+
+/// Parses `BaseRegQueryInfoKey` response: `lpClassOut`, metadata DWORDs, `FILETIME`, Win32 error.
+pub fn parse_query_info_key_response(stub: &[u8]) -> Result<RegKeyInfo, CoreError> {
+    let mut r = NdrReader::new(stub);
+    // lpClassOut: RRP_UNICODE_STRING { Length, MaxLength, Buffer referent }
+    let length = r.read_u16()?;
+    let _max_length = r.read_u16()?;
+    let buf_ref = r.read_u32()?;
+
+    let class_name = if buf_ref != 0 && length > 0 {
+        read_deferred_unicode_string(&mut r)?
+    } else if buf_ref != 0 {
+        // Referent present but zero-length: consume the deferred array
+        let _max = r.read_u32()?;
+        let _off = r.read_u32()?;
+        let _act = r.read_u32()?;
+        String::new()
+    } else {
+        String::new()
+    };
+
+    let sub_keys = r.read_u32()?;
+    let max_subkey_len = r.read_u32()?;
+    let max_class_len = r.read_u32()?;
+    let values = r.read_u32()?;
+    let max_value_name_len = r.read_u32()?;
+    let max_value_len = r.read_u32()?;
+    let _security_descriptor_len = r.read_u32()?;
+    let last_write_time = r.read_u64()?;
+    let err = r.read_u32()?;
+    accept_win32(err)?;
+
+    Ok(RegKeyInfo {
+        class_name,
+        sub_keys,
+        max_subkey_len,
+        max_class_len,
+        values,
+        max_value_name_len,
+        max_value_len,
+        last_write_time,
+    })
+}
+
 /// `BaseRegCloseKey` (5): `[in,out] hKey`.
 pub fn build_base_reg_close_key_stub(hkey: &RegHandle) -> Vec<u8> {
     let mut w = NdrWriter::with_capacity(20);
@@ -716,6 +788,34 @@ impl<T: RpcTransport> RrpClient<T> {
             build_base_reg_close_key_stub(hkey),
         )?;
         parse_error_response(&r)
+    }
+
+    /// Queries key metadata including class name via `BaseRegQueryInfoKey` (opnum 16).
+    pub fn query_info_key(&mut self, hkey: &RegHandle) -> Result<RegKeyInfo, CoreError> {
+        let r = self.call(
+            opnum::BASE_REG_QUERY_INFO_KEY,
+            build_base_reg_query_info_key_stub(hkey, 1024),
+        )?;
+        parse_query_info_key_response(&r)
+    }
+
+    /// Queries a value using a dynamically sized buffer based on `query_info_key` metadata.
+    /// Falls back to `max_len` if info query fails.
+    pub fn query_value_large(
+        &mut self,
+        hkey: &RegHandle,
+        value_name: &str,
+        max_len: u32,
+    ) -> Result<(u32, Vec<u8>), CoreError> {
+        let buf_size = match self.query_info_key(hkey) {
+            Ok(info) if info.max_value_len > 0 => info.max_value_len + 16,
+            _ => max_len,
+        };
+        let r = self.call(
+            opnum::BASE_REG_QUERY_VALUE,
+            build_base_reg_query_value_stub(hkey, value_name, buf_size),
+        )?;
+        parse_query_value_response(&r)
     }
 
     /// Enumerates all values in an opened key.
