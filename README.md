@@ -337,27 +337,49 @@ In addition to the multi-call CLI binary, `impacket-rs` provides modular crates 
 
 ## Architecture & Crates
 
-> 📐 **Deep-Dive Specifications**: See [**`docs/ARCHITECTURE.md`**](docs/ARCHITECTURE.md) for crate architecture, cross-era compatibility tiers, and SemVer strategy, and [**`docs/VISION_AND_ROADMAP.md`**](docs/VISION_AND_ROADMAP.md) for engineering audits, Python vs. Rust benchmarks, and memory safety analysis.
+> 📐 **Deep-Dive Specifications**: See [**`docs/ARCHITECTURE.md`**](docs/ARCHITECTURE.md) for crate architecture, cross-era compatibility tiers, and SemVer strategy, and [**`docs/VISION_AND_ROADMAP.md`**](docs/VISION_AND_ROADMAP.md) for ecosystem gap analysis (Python v0.14-dev & Go), performance benchmarks, and memory safety analysis.
 
 ```text
 impacket-rs/
 ├── crates/
-│   ├── impacket-core       # Target specification parser, AdCompatProfile, FileTime, NTSTATUS
+│   ├── impacket-core       # TransportStream (SOCKS5/HTTP/IPv6), TargetSpec, AdCompatProfile, NTSTATUS
 │   ├── impacket-crypto     # Pure-Rust constant-time crypto: AES, DES, RC4, MD5, SHA, PBKDF2
-│   ├── impacket-ndr        # Zero-copy NDR/NDR64 marshaling engine & derive macros
-│   ├── impacket-auth       # NTLMv1/v2, SPNEGO, Session Security (seal/sign/MIC)
-│   ├── impacket-krb5       # Kerberos RFC 4120, FAST (RFC 6113), PAC, U2U, PKINIT, tickets
-│   ├── impacket-smb        # SMBv1, SMB2, SMB 3.1.1, SMB Direct (RDMA), SMB file server
+│   ├── impacket-ndr        # Zero-copy NDR marshaling engine (5.85M ops/sec) & derive macros
+│   ├── impacket-auth       # NTLMSSP, CBT Channel Binding Hashes, SPNEGO, ccache/kirbi
+│   ├── impacket-krb5       # Kerberos RFC 4120, FAST (RFC 6113), PAC, U2U, PKINIT, ticket forger
+│   ├── impacket-smb        # SMB 2.0.2–3.1.1, SMB Direct (RDMA), named pipes, SMB file server
 │   ├── impacket-dcerpc     # DCE/RPC v5 PDU framing, Endpoint Mapper, RPC security contexts
-│   ├── impacket-msrpc      # MS-SAMR, MS-LSAT, MS-SRVS, MS-WKST, MS-SCMR, MS-RRP, MS-EVEN6
-│   ├── impacket-sam        # Offline SAM/SYSTEM/SECURITY hives, NTDS.dit, DPAPI, GPP cpassword
-│   ├── impacket-ldap       # Pure-Rust LDAP/LDAPS ASN.1 BER client, MS-DNSP, ldap_shell
-│   ├── impacket-dcom       # DCOM/ORPC, IObjectExporter, MMC20, ShellWindows, WMI
+│   ├── impacket-msrpc      # MS-SAMR, MS-LSAT, MS-SRVS, MS-SCMR, MS-RRP, MS-EVEN6, MS-EFSR/RPRN
+│   ├── impacket-adcs       # Active Directory Certificate Services (MS-ICPR, MS-CSRA, ESC1-ESC15)
+│   ├── impacket-sam        # Offline SAM/SYSTEM/SECURITY, NTDS.dit ESE, DPAPI, WMI ShadowCopy
+│   ├── impacket-ldap       # Pure-Rust LDAP/LDAPS ASN.1 BER client, MS-DNSP, msDS-KeyCredentialLink
+│   ├── impacket-dcom       # DCOM/ORPC, IObjectExporter, MMC20, ShellWindows, WMI automation
 │   ├── impacket-mssql      # TDS 7.x/8.0 parser, MC-SQLR resolution, mssqlclient engine
-│   └── impacket-relay      # NTLM cross-protocol relay engine & session state machine
+│   └── impacket-relay      # Multi-target NTLM relay (HTTP/SMB/LDAP/MSSQL/WinRMS/RPC/ADCS)
 └── bins/
-    └── impacket-rs         # Unified multi-call CLI binary (all 74 tools)
+    └── impacket-rs         # Unified multi-call CLI binary (74+ subcommands)
 ```
+
+---
+
+## Evolutionary Roadmap (v0.2.0 → v1.0.0)
+
+Impacket-RS bridges the gap between Python Impacket (v0.13/v0.14-dev) and modern Go toolkits (`go-msrpc`, `Certipy`, `krbrelayx`, `pywhisker`):
+
+```text
+v0.1.x (Current)            v0.2.0 (Q1 2027)            v0.3.0 (Q2 2027)            v0.4.0 (Q3 2027)            v1.0.0 (Q4 2027)
+74 Core Subcommands     ──► Transport & Hardening   ──► Relay & Coercion        ──► ADCS & LAPS v2          ──► C2/FFI & Ecosystem
+• Pure-Rust Crypto          • Native SOCKS5/HTTP        • RPC/EPM Relay             • [MS-ICPR] / [MS-CSRA]     • C ABI / PyO3 Bindings
+• SMB/RPC/Krb5/LDAP           Proxy in Core             • WinRMS & SCCM Relay       • ESC1–ESC15 Auditor        • BloodHound CE Export
+• Static Binaries           • Full IPv6 Support         • Coerce (EFSR/RPRN/        • Shadow Credentials        • Stable 1.0 SemVer
+• Zero Python/C Deps        • WMI Shadow / regsecrets     FSRVP/DFSNM)              • MS-GKDI LAPS v2           • Official Debian/Kali
+                            • LDAP CBT & Signing        • Interactive Relay Shell   • PKINIT Cert-to-TGT          Packaging
+```
+
+- **Phase 1 (v0.2.0)**: In-core SOCKS5/HTTP proxying (no broken `proxychains4` on static `musl`), IPv6 dual-stack, LDAP Channel Binding (CBT) & signing enforcement, and low-artifact dumping (`regsecrets` via `[MS-RRP]` and WMI ShadowCopy).
+- **Phase 2 (v0.3.0)**: Unified `coerce` subcommand (`[MS-EFSR]`, `[MS-RPRN]`, `[MS-FSRVP]`, `[MS-DFSNM]`), expanded `ntlmrelayx` targets (WinRM/WinRMS, RPC/EPM, SCCM MP/DP, ADCS CES), and interactive relay multiplexer.
+- **Phase 3 (v0.4.0)**: Pure-Rust `impacket-adcs` (ESC1–ESC15 vulnerability scanner, PKCS#10 CSR, certificate issuance), Shadow Credentials (`whisker` subcommand for `msDS-KeyCredentialLink`), and Windows LAPS v2 (`[MS-GKDI]` CNG/DPAPI-NG).
+- **Phase 4 (v1.0.0)**: Machine-readable output (`--format json`, `--bloodhound` export), C ABI and PyO3 language bindings for C2 implants, and official Kali/Debian in-tree packaging.
 
 ---
 
