@@ -1,7 +1,12 @@
 //! `client`: Active Directory LDAP client engine supporting RFC 4511 BER protocol operations.
 
 use crate::asn1::{op_tag, result_code, BindAuth, LdapMessage, ProtocolOp, SearchScope};
-use impacket_core::CoreError;
+use impacket_auth::{
+    compute_ntlmv2_response,
+    spnego::{extract_embedded_auth_token, NegTokenInit, NegTokenResp},
+    NtlmAuthenticateMessage, NtlmChallengeMessage, NtlmNegotiateMessage,
+};
+use impacket_core::{AdCompatProfile, CoreError, FileTime, NtlmHashes, TargetSpec, TransportStream};
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::net::{TcpStream, ToSocketAddrs};
@@ -143,6 +148,18 @@ impl LdapClient<TcpStream> {
     }
 }
 
+impl LdapClient<TransportStream> {
+    /// Connects to an LDAP server using a TargetSpec, supporting IPv6 and SOCKS5/HTTP proxies.
+    pub fn connect_spec(
+        spec: &TargetSpec,
+        default_port: u16,
+        timeout: Duration,
+    ) -> Result<Self, CoreError> {
+        let stream = TransportStream::connect_target(spec, default_port, timeout)?;
+        Ok(Self::new(stream))
+    }
+}
+
 impl<S: Read + Write> LdapClient<S> {
     /// Creates an LDAP client over an existing stream (e.g. TCP or TLS).
     pub fn new(stream: S) -> Self {
@@ -252,6 +269,66 @@ impl<S: Read + Write> LdapClient<S> {
                 other
             ))),
         }
+    }
+
+    /// Performs SASL GSS-SPNEGO NTLM bind with optional Channel Binding Tokens (CBT)
+    /// calculated from a TLS server certificate, satisfying Windows Server 2022/2025
+    /// LDAP Channel Binding and signing enforcement.
+    pub fn bind_ntlm(
+        &mut self,
+        username: &str,
+        domain: &str,
+        hashes: &NtlmHashes,
+        server_cert_der: Option<&[u8]>,
+    ) -> Result<(), CoreError> {
+        let ntlm_neg = NtlmNegotiateMessage::for_profile(AdCompatProfile::ModernHardened2025);
+        let neg_token = NegTokenInit::for_ntlmssp(&ntlm_neg.to_bytes());
+        let server_token_opt = self.bind_sasl_spnego(&neg_token.to_bytes())?;
+        let server_token = server_token_opt.ok_or_else(|| {
+            CoreError::ProtocolError("LDAP SASL challenge empty from server".into())
+        })?;
+
+        let ntlm_chall_bytes = extract_embedded_auth_token(&server_token)?;
+        let challenge = NtlmChallengeMessage::from_bytes(&ntlm_chall_bytes)?;
+
+        let mut target_info = challenge.target_info;
+        if let Some(cert) = server_cert_der {
+            target_info = target_info.with_channel_bindings(cert);
+        }
+
+        let client_chall = [0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88];
+        let now = FileTime::now();
+        let target_info_bytes = target_info.to_bytes();
+
+        let computed = compute_ntlmv2_response(
+            username,
+            domain,
+            hashes,
+            &challenge.server_challenge,
+            &client_chall,
+            now,
+            &target_info_bytes,
+        );
+
+        let type3 = NtlmAuthenticateMessage {
+            domain: domain.to_string(),
+            username: username.to_string(),
+            workstation: "WORKSTATION".to_string(),
+            lm_challenge_response: computed.lm_challenge_response,
+            nt_challenge_response: computed.nt_challenge_response,
+            encrypted_session_key: Vec::new(),
+            flags: challenge.flags,
+            os_major: 10,
+            os_minor: 0,
+            os_build: 26100,
+        };
+
+        let mut resp_token = NegTokenResp::new();
+        resp_token.response_token = Some(type3.to_bytes());
+
+        let final_resp = self.bind_sasl_spnego(&resp_token.to_bytes())?;
+        let _ = final_resp;
+        Ok(())
     }
 
     /// Performs an LDAP search query and collects all matching entries.

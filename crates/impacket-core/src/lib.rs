@@ -116,6 +116,14 @@ impl FileTime {
         Self(secs * 10_000_000 + Self::EPOCH_DIFF_100NS)
     }
 
+    pub fn now() -> Self {
+        let secs = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        Self::from_unix_secs(secs)
+    }
+
     pub const fn to_unix_secs(self) -> Option<u64> {
         if self.0 < Self::EPOCH_DIFF_100NS {
             None
