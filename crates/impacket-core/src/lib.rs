@@ -23,6 +23,9 @@ pub mod version {
 }
 
 pub mod der;
+pub mod transport;
+
+pub use transport::{ProxyAuth, ProxyConfig, ProxyType, TransportStream};
 
 /// Volatile memory wipe helper (equivalent to `zeroize`) to ensure sensitive
 /// keys, passwords, and NTLM hashes are scrubbed from RAM on `Drop`.
@@ -258,6 +261,7 @@ pub struct TargetSpec {
     pub hashes: Option<NtlmHashes>,
     pub aes_key: Option<Vec<u8>>,
     pub compat_profile: AdCompatProfile,
+    pub proxy: Option<ProxyConfig>,
 }
 
 impl TargetSpec {
@@ -312,6 +316,7 @@ impl TargetSpec {
             hashes: None,
             aes_key: None,
             compat_profile: AdCompatProfile::UniversalAuto,
+            proxy: ProxyConfig::from_env(),
         })
     }
 
@@ -323,6 +328,16 @@ impl TargetSpec {
     pub fn with_compat_profile(mut self, profile: AdCompatProfile) -> Self {
         self.compat_profile = profile;
         self
+    }
+
+    pub fn with_proxy(mut self, proxy: ProxyConfig) -> Self {
+        self.proxy = Some(proxy);
+        self
+    }
+
+    pub fn with_proxy_url(mut self, proxy_url: &str) -> Result<Self, CoreError> {
+        self.proxy = Some(ProxyConfig::parse(proxy_url)?);
+        Ok(self)
     }
 
     pub fn effective_target_ip(&self) -> &str {
@@ -343,6 +358,7 @@ pub enum CoreError {
     NtStatus(NtStatus),
     RpcFault(u32),
     IoError(String),
+    ProxyError(String),
 }
 
 impl fmt::Display for CoreError {
@@ -361,6 +377,7 @@ impl fmt::Display for CoreError {
             Self::ProtocolError(msg) => write!(f, "Protocol error: {}", msg),
             Self::RpcFault(status) => write!(f, "DCE/RPC Fault status: 0x{:08X}", status),
             Self::IoError(msg) => write!(f, "I/O error: {}", msg),
+            Self::ProxyError(msg) => write!(f, "Proxy error: {}", msg),
             Self::NtStatus(status) => write!(
                 f,
                 "NTSTATUS 0x{:08X} ({}): {}",
@@ -472,11 +489,13 @@ pub fn encode_utf16le(s: &str) -> Vec<u8> {
 }
 
 pub fn decode_utf16le(bytes: &[u8]) -> Result<String, CoreError> {
-    if bytes.len() % 2 != 0 {
+    if !bytes.len().is_multiple_of(2) {
         return Err(CoreError::InvalidUtf16);
     }
     let units: Vec<u16> = bytes
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]))
         .collect();
     String::from_utf16(&units).map_err(|_| CoreError::InvalidUtf16)
@@ -491,12 +510,12 @@ pub fn decode_hex_16(hex: &str) -> Result<[u8; 16], CoreError> {
 
 pub fn decode_hex(hex: &str) -> Result<Vec<u8>, CoreError> {
     let hex = hex.trim();
-    if hex.len() % 2 != 0 {
+    if !hex.len().is_multiple_of(2) {
         return Err(CoreError::InvalidHex("Odd number of hex digits".into()));
     }
     let mut out = Vec::with_capacity(hex.len() / 2);
     let bytes = hex.as_bytes();
-    for chunk in bytes.chunks_exact(2) {
+    for chunk in bytes.as_chunks::<2>().0 {
         let hi = hex_val(chunk[0])?;
         let lo = hex_val(chunk[1])?;
         out.push((hi << 4) | lo);
@@ -529,7 +548,7 @@ pub fn encode_hex(bytes: &[u8]) -> String {
 
 pub fn encode_base64(data: &[u8]) -> String {
     const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut out = String::with_capacity((data.len() + 2) / 3 * 4);
+    let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
     for chunk in data.chunks(3) {
         let b0 = chunk[0];
         let b1 = if chunk.len() > 1 { chunk[1] } else { 0 };
@@ -563,7 +582,7 @@ pub fn decode_base64(input: &str) -> Result<Vec<u8>, CoreError> {
     }
 
     let clean: Vec<u8> = input.bytes().filter(|b| !b.is_ascii_whitespace()).collect();
-    if clean.len() % 4 != 0 {
+    if !clean.len().is_multiple_of(4) {
         return Err(CoreError::ProtocolError("Invalid base64 length".into()));
     }
     let mut out = Vec::with_capacity(clean.len() / 4 * 3);

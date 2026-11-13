@@ -190,6 +190,8 @@ fn parse_target_with_hashes(args: &[String]) -> Result<TargetSpec, String> {
     for i in 1..args.len() {
         if args[i] == "-hashes" && i + 1 < args.len() {
             spec = spec.with_hashes(&args[i + 1]).map_err(|e| e.to_string())?;
+        } else if (args[i] == "-proxy" || args[i] == "--proxy") && i + 1 < args.len() {
+            spec = spec.with_proxy_url(&args[i + 1]).map_err(|e| e.to_string())?;
         }
     }
     spec = spec.with_compat_profile(parse_compat_flag(args));
@@ -3231,6 +3233,7 @@ fn cmd_netview(args: &[String]) {
             hashes: None,
             aes_key: None,
             compat_profile: AdCompatProfile::UniversalAuto,
+            proxy: None,
         });
 
         for line in content.lines() {
@@ -11443,5 +11446,39 @@ fn main() {
         Some("rpc-interfaces") => cmd_rpc_interfaces(),
         Some("bench-ndr") => cmd_bench_ndr(&args[1..]),
         _ => print_usage(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_target_with_proxy_flags() {
+        let args1 = vec![
+            "corp/user:pass@10.0.0.1".to_string(),
+            "-proxy".to_string(),
+            "socks5://127.0.0.1:1080".to_string(),
+        ];
+        let spec1 = parse_target_with_hashes(&args1).unwrap();
+        assert_eq!(spec1.remote_name, "10.0.0.1");
+        assert!(spec1.proxy.is_some());
+        let proxy1 = spec1.proxy.unwrap();
+        assert_eq!(proxy1.proxy_type, impacket_core::ProxyType::Socks5);
+        assert_eq!(proxy1.host, "127.0.0.1");
+        assert_eq!(proxy1.port, 1080);
+
+        let args2 = vec![
+            "admin:Pass123@dc.corp.local".to_string(),
+            "--proxy".to_string(),
+            "http://proxy.corp.internal:8080".to_string(),
+        ];
+        let spec2 = parse_target_with_hashes(&args2).unwrap();
+        assert_eq!(spec2.remote_name, "dc.corp.local");
+        assert!(spec2.proxy.is_some());
+        let proxy2 = spec2.proxy.unwrap();
+        assert_eq!(proxy2.proxy_type, impacket_core::ProxyType::HttpConnect);
+        assert_eq!(proxy2.host, "proxy.corp.internal");
+        assert_eq!(proxy2.port, 8080);
     }
 }
