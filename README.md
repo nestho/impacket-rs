@@ -11,7 +11,7 @@
 
 <p align="center">
   <a href="https://github.com/nestho/impacket-rs/actions/workflows/ci.yml"><img src="https://github.com/nestho/impacket-rs/actions/workflows/ci.yml/badge.svg" alt="CI Status"/></a>
-  <a href="https://www.bestpractices.dev/projects"><img src="https://www.bestpractices.dev/projects/badge" alt="OpenSSF Best Practices"/></a>
+  <a href="https://www.bestpractices.dev/projects/16665"><img src="https://www.bestpractices.dev/projects/16665/badge" alt="OpenSSF Best Practices"/></a>
   <img src="https://img.shields.io/badge/license-Apache--2.0-blue.svg" alt="License"/>
   <img src="https://img.shields.io/badge/rust-1.75%2B%20(2021)-orange.svg" alt="Rust 2021 Edition"/>
   <img src="https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-brightgreen.svg" alt="Platform"/>
@@ -416,7 +416,11 @@ For detailed coding standards, crate structure, and local validation steps, see 
 
 ## Security & Best Practices
 
-Impacket-RS adheres to the [OpenSSF Best Practices](https://www.bestpractices.dev/) criteria for secure open-source software development:
+<p align="left">
+  <a href="https://www.bestpractices.dev/projects/16665"><img src="https://www.bestpractices.dev/projects/16665/badge" alt="OpenSSF Best Practices"/></a>
+</p>
+
+Impacket-RS has earned the **OpenSSF Best Practices Passing Badge** ([project #16665](https://www.bestpractices.dev/en/projects/16665)):
 
 - **Security Policy**: See [**`SECURITY.md`**](SECURITY.md) for our vulnerability disclosure guidelines, response SLAs, and private reporting channels (`nestho@icloud.com`).
 - **Code of Conduct**: See [**`CODE_OF_CONDUCT.md`**](CODE_OF_CONDUCT.md) for community standards based on Contributor Covenant v2.1.
