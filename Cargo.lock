@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "impacket-auth"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "impacket-core",
  "impacket-crypto",
@@ -12,18 +12,18 @@ dependencies = [
 
 [[package]]
 name = "impacket-core"
-version = "0.1.0"
+version = "0.1.1"
 
 [[package]]
 name = "impacket-crypto"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "impacket-core",
 ]
 
 [[package]]
 name = "impacket-dcerpc"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "impacket-auth",
  "impacket-core",
@@ -32,7 +32,7 @@ dependencies = [
 
 [[package]]
 name = "impacket-dcom"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "impacket-core",
  "impacket-dcerpc",
@@ -41,7 +41,7 @@ dependencies = [
 
 [[package]]
 name = "impacket-krb5"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "impacket-core",
  "impacket-crypto",
@@ -50,7 +50,7 @@ dependencies = [
 
 [[package]]
 name = "impacket-ldap"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "impacket-auth",
  "impacket-core",
@@ -60,7 +60,7 @@ dependencies = [
 
 [[package]]
 name = "impacket-msrpc"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "impacket-auth",
  "impacket-core",
@@ -72,7 +72,7 @@ dependencies = [
 
 [[package]]
 name = "impacket-mssql"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "impacket-auth",
  "impacket-core",
@@ -81,14 +81,14 @@ dependencies = [
 
 [[package]]
 name = "impacket-ndr"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "impacket-core",
 ]
 
 [[package]]
 name = "impacket-relay"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "impacket-auth",
  "impacket-core",
@@ -99,7 +99,7 @@ dependencies = [
 
 [[package]]
 name = "impacket-rs"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "impacket-auth",
  "impacket-core",
@@ -118,7 +118,7 @@ dependencies = [
 
 [[package]]
 name = "impacket-sam"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "impacket-core",
  "impacket-crypto",
@@ -127,7 +127,7 @@ dependencies = [
 
 [[package]]
 name = "impacket-smb"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "impacket-auth",
  "impacket-core",

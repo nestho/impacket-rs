@@ -18,9 +18,9 @@ members = [
 ]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
-authors = ["Nestho <63925710+nestho@users.noreply.github.com>"]
+authors = ["Nestho <nestho@icloud.com>"]
 license = "Apache-2.0"
 repository = "https://github.com/nestho/impacket-rs"
 description = "High-performance, memory-safe pure-Rust redesign of Impacket protocols and Active Directory tools for Linux, macOS, and Windows"

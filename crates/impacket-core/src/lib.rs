@@ -641,6 +641,6 @@ mod tests {
         assert!(AdCompatProfile::LegacyWin2000.allows_ntlmv1());
         assert!(!AdCompatProfile::UniversalAuto.allows_ntlmv1());
         assert!(AdCompatProfile::ModernHardened2025.requires_epa_channel_binding());
-        assert!(version::BANNER.contains("Impacket-RS v0.1.0 - High-Performance Active Directory & Protocol Toolkit"));
+        assert!(version::BANNER.contains("Impacket-RS v0.1.1 - High-Performance Active Directory & Protocol Toolkit"));
     }
 }
