@@ -21,6 +21,25 @@ This project follows **Semantic Versioning 2.0.0 (SemVer)** and the exact change
 
 ---
 
+## [v0.2.1] - 2026-11-13
+
+1. Low-Artifact & Stealth Credential Extraction
+
+    * **Remote Registry In-Memory Secrets Extraction (`regsecrets`, `crates/impacket-sam::regsecrets`)**:
+        * Ported Python Impacket v0.13 `regsecrets.py`: extracts BootKey (SysKey), SAM user password hashes, LSA secrets, and DCC2 cached domain credentials directly over `[MS-RRP]` wire protocol without writing hive files to remote disk or creating services.
+        * Added `BaseRegQueryInfoKey` (Opnum 16) stub builder and response parser in `crates/impacket-msrpc::rrp` to dynamically query key metadata and class names.
+        * Added `RrpClient::query_info_key` and `RrpClient::query_value_large` handling arbitrary-length registry records.
+        * Added dedicated standalone `regsecrets <TARGET>` CLI subcommand in `bins/impacket-rs`.
+        * Added `-use-reg` / `-reg` / `-stealth` flags to `secretsdump` for zero-disk-write in-memory credential extraction.
+    * **WMI Volume Shadow Copy Hive Extraction (`crates/impacket-sam::shadowcopy`)**:
+        * Added agentless VSS snapshot engine using WMI `Win32_ShadowCopy` and `vssadmin` to copy locked SAM, SYSTEM, and SECURITY hives from shadow paths (`\\?\GLOBALROOT\Device\HarddiskVolumeShadowCopyN`) without touching live OS hive files.
+        * Added `-use-vss` / `-vss` flag to `secretsdump` in `bins/impacket-rs` with automatic shadow copy creation, hive extraction, SMB download, and remote shadow cleanup.
+    * **CLI & Help Engine Integration**:
+        * Added comprehensive help message and alias resolution for `regsecrets` across all CLI invocation modes.
+        * Updated `secretsdump` help documentation with `-use-vss` and `-use-reg` options.
+
+---
+
 ## [v0.2.0] - 2026-11-13
 
 1. Library & Protocol Improvements
