@@ -254,6 +254,7 @@ pub struct TargetSpec {
     pub username: String,
     pub password: Option<SecretString>,
     pub remote_name: String,
+    pub target_port: Option<u16>,
     pub dc_ip: Option<String>,
     pub target_ip: Option<String>,
     pub use_kerberos: bool,
@@ -271,16 +272,50 @@ impl TargetSpec {
             return Err(CoreError::InvalidTarget("Target string cannot be empty".into()));
         }
 
-        let (credentials_part, remote_name) = match target.rsplit_once('@') {
+        let (credentials_part, host_port_raw) = match target.rsplit_once('@') {
             Some((creds, host)) => (Some(creds), host.trim()),
             None => (None, target),
         };
 
-        if remote_name.is_empty() {
+        if host_port_raw.is_empty() {
             return Err(CoreError::InvalidTarget(
                 "Missing target hostname or IP address after '@'".into(),
             ));
         }
+
+        let (remote_name, target_port) = if host_port_raw.starts_with('[') {
+            // Bracketed IPv6: [2001:db8::1] or [fe80::1]:445
+            if let Some(end) = host_port_raw.find(']') {
+                let ipv6_host = &host_port_raw[1..end];
+                let rest = &host_port_raw[end + 1..];
+                let port = if let Some(p_str) = rest.strip_prefix(':') {
+                    Some(
+                        p_str
+                            .parse::<u16>()
+                            .map_err(|e| CoreError::InvalidTarget(format!("Invalid target port: {}", e)))?,
+                    )
+                } else {
+                    None
+                };
+                (ipv6_host.to_string(), port)
+            } else {
+                return Err(CoreError::InvalidTarget(
+                    "Mismatched bracket in IPv6 address: missing closing ']'".into(),
+                ));
+            }
+        } else if let Some((h, p_str)) = host_port_raw.split_once(':') {
+            // Check if it's an unbracketed IPv6 (contains multiple colons)
+            if h.contains(':') || p_str.contains(':') {
+                (host_port_raw.to_string(), None)
+            } else {
+                let port = p_str
+                    .parse::<u16>()
+                    .map_err(|e| CoreError::InvalidTarget(format!("Invalid target port: {}", e)))?;
+                (h.to_string(), Some(port))
+            }
+        } else {
+            (host_port_raw.to_string(), None)
+        };
 
         let mut domain = String::new();
         let mut username = String::new();
@@ -308,7 +343,8 @@ impl TargetSpec {
             domain,
             username,
             password,
-            remote_name: remote_name.to_string(),
+            remote_name,
+            target_port,
             dc_ip: None,
             target_ip: None,
             use_kerberos: false,
@@ -342,6 +378,10 @@ impl TargetSpec {
 
     pub fn effective_target_ip(&self) -> &str {
         self.target_ip.as_deref().unwrap_or(&self.remote_name)
+    }
+
+    pub fn effective_port(&self, default_port: u16) -> u16 {
+        self.target_port.unwrap_or(default_port)
     }
 }
 
@@ -647,6 +687,30 @@ mod tests {
         );
         assert_eq!(spec.remote_name, "10.10.11.200");
         assert_eq!(spec.compat_profile, AdCompatProfile::UniversalAuto);
+    }
+
+    #[test]
+    fn test_parse_target_ipv6_and_port() {
+        let spec1 = TargetSpec::parse("DOMAIN/user:pass@[fe80::1]:445").unwrap();
+        assert_eq!(spec1.domain, "DOMAIN");
+        assert_eq!(spec1.username, "user");
+        assert_eq!(spec1.remote_name, "fe80::1");
+        assert_eq!(spec1.target_port, Some(445));
+        assert_eq!(spec1.effective_port(445), 445);
+
+        let spec2 = TargetSpec::parse("admin:secret@[2001:db8::1]").unwrap();
+        assert_eq!(spec2.remote_name, "2001:db8::1");
+        assert_eq!(spec2.target_port, None);
+        assert_eq!(spec2.effective_port(389), 389);
+
+        let spec3 = TargetSpec::parse("user:pass@2001:db8::1").unwrap();
+        assert_eq!(spec3.remote_name, "2001:db8::1");
+        assert_eq!(spec3.target_port, None);
+
+        let spec4 = TargetSpec::parse("user:pass@dc.corp.local:8888").unwrap();
+        assert_eq!(spec4.remote_name, "dc.corp.local");
+        assert_eq!(spec4.target_port, Some(8888));
+        assert_eq!(spec4.effective_port(88), 8888);
     }
 
     #[test]

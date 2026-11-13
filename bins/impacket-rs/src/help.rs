@@ -6,6 +6,11 @@ pub fn print_tool_help(tool_name: &str) {
     print!("{}", version::BANNER);
     if let Some(help) = get_tool_help(tool_name) {
         println!("{}", help);
+        println!("global connection options:");
+        println!("  -proxy <URL>, --proxy <URL>   Route traffic through SOCKS5 (socks5://host:port) or HTTP (http://host:port) proxy");
+        println!("                                (auto-detected from ALL_PROXY, HTTPS_PROXY, HTTP_PROXY env vars)");
+        println!("  --compat <PROFILE>            Active Directory dialect: legacy, auto, modern (default: auto)");
+        println!();
     } else {
         println!("[-] No detailed help available for tool '{}'", tool_name);
         println!("[*] Run 'impacket-rs' without arguments to see all available tools.");
