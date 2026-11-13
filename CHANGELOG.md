@@ -21,7 +21,7 @@ This project follows **Semantic Versioning 2.0.0 (SemVer)** and the exact change
 
 ---
 
-## [Unreleased]
+## [v0.2.0] - 2026-11-13
 
 1. Library & Protocol Improvements
 
@@ -35,6 +35,12 @@ This project follows **Semantic Versioning 2.0.0 (SemVer)** and the exact change
         * Added native IPv6 parsing support for bracketed targets (`[fe80::1]`, `[2001:db8::1]:445`) and unbracketed targets in `TargetSpec`.
         * Added dual-stack connection fallback in `TransportStream::connect_direct` resolving both IPv6 and IPv4 addresses.
         * Added `target_port` and `effective_port` helpers to `TargetSpec`.
+    * **Hardened Active Directory LDAP Channel Binding Tokens (CBT) & EPA (`crates/impacket-auth::cbt`, `crates/impacket-ldap`)**:
+        * Implemented RFC 5929 `tls-server-end-point` and `[MS-NLMP]` 3.1.5.1.2 `gss_channel_bindings_struct` token calculation from TLS server certificates.
+        * Added `compute_channel_bindings_hash_from_cert`, `compute_channel_bindings_hash_from_sha256`, and `inject_channel_bindings` injecting CBT hashes into `MsvAvChannelBindings` (0x000A).
+        * Set `MSV_AV_FLAG_CHANNEL_BINDING_PRESENT` (0x00000002) in `MsvAvFlags` when channel bindings are active.
+        * Added `bind_ntlm` in `LdapClient` with automatic SPNEGO NTLM negotiation and certificate channel binding, overcoming Windows Server 2022/2025 `strongAuthRequired` / `LDAPServerIntegrity` rejections.
+        * Added `LdapClient::connect_spec` connecting via `TransportStream` with proxy and IPv6 support.
     * **Global CLI Flag & Help Engine Integration (`bins/impacket-rs`)**:
         * Added `-proxy` and `--proxy <URL>` flag parsing to `parse_target_with_hashes` across all 74 subcommands.
         * Enriched `print_tool_help` in `bins/impacket-rs/src/help.rs` with `global connection options:` documenting proxy tunneling and `--compat` for all 74 tools.
