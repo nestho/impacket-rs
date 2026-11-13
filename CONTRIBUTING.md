@@ -70,21 +70,28 @@ Place your changes in the appropriate crate or directory:
 - `bins/impacket-rs`: Command-line interface, tool arguments, and dispatching.
 - `docs/COMMAND_REFERENCE.md`: Documentation for tools and usage syntax.
 
-### 4. Code Standards & Local Verification
-Before committing, ensure your code compiles cleanly and passes all workspace checks:
+### 4. Code Standards, Automated Testing & Verification
+
+Per our [OpenSSF Best Practices](https://www.bestpractices.dev/) standards, all contributions must adhere to these policies:
+
+- **Automated Test Requirement**: Every new feature, protocol implementation, or bug fix **MUST** include corresponding automated unit or integration tests (`cargo test`).
+- **Compiler Warnings Policy**: Code must compile cleanly without compiler errors (`cargo check --workspace --all-targets`).
+- **Code Formatting & Linting**: Code must follow standard Rust style guidelines.
+
+Verify locally before committing:
 
 ```bash
 # 1. Compile all workspace crates
 cargo check --workspace --all-targets
 
-# 2. Run unit and integration tests
+# 2. Run full automated test suite
 cargo test --workspace
 
 # 3. Check code formatting
 cargo fmt --all -- --check
 
-# 4. Run Clippy lints
-cargo clippy --workspace --all-targets -- -D warnings
+# 4. Run Clippy static analysis
+cargo clippy --workspace --all-targets
 ```
 
 ### 5. Commit Guidelines
@@ -109,6 +116,12 @@ We use [Conventional Commits](https://www.conventionalcommits.org/):
 
 ---
 
+## Community Code of Conduct
+
+Participation in this project is governed by the [**`CODE_OF_CONDUCT.md`**](CODE_OF_CONDUCT.md) (Contributor Covenant v2.1).
+
+---
+
 ## Reporting Vulnerabilities
 
-If you discover a security vulnerability in `impacket-rs`, please **do not** open a public issue. Instead, submit a private advisory through [GitHub Security Advisories](https://github.com/nestho/impacket-rs/security/advisories) or contact [@nestho](https://github.com/nestho) directly.
+If you discover a security vulnerability in `impacket-rs`, please **do not** open a public issue. See [**`SECURITY.md`**](SECURITY.md) for full vulnerability reporting procedures, SLAs, and safe harbor terms, or contact **nestho@icloud.com** directly.

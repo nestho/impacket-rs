@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "main", "dev" ]
   pull_request:
-    branches: [ "main" ]
+    branches: [ "main", "dev" ]
 
 env:
   CARGO_TERM_COLOR: always
@@ -25,6 +25,16 @@ jobs:
         run: cargo check --workspace --all-targets
       - name: Cargo test
         run: cargo test --workspace --verbose
+
+  analysis:
+    name: Static Analysis & Linter (Clippy)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Ensure stable Rust toolchain with clippy
+        run: rustup default stable && rustup component add clippy
+      - name: Run Clippy static analysis
+        run: cargo clippy --workspace --all-targets
 
   security:
     name: Security Audit (Trivy + Cargo Audit)
