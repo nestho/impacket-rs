@@ -6,9 +6,14 @@
 //! - **Modern Hardened Era (Windows Server 2022 / 2025)**: NTLMv2 with EPA Channel Binding (`MsvAvChannelBindings`), Target SPN (`MsvAvTargetName`), and `MsvAvFlags` MIC enforcement
 //! - **SPNEGO (`1.3.6.1.5.5.2`)**: ASN.1 DER `NegTokenInit` and `NegTokenResp` token wrapping
 
+pub mod cbt;
 pub mod session_security;
 pub mod spnego;
 
+pub use cbt::{
+    compute_channel_bindings_hash_from_cert, compute_channel_bindings_hash_from_sha256,
+    inject_channel_bindings, MSV_AV_FLAG_CHANNEL_BINDING_PRESENT,
+};
 pub use session_security::NtlmSessionSecurity;
 
 use impacket_core::{
@@ -248,6 +253,14 @@ impl NtlmTargetInfo {
             }
         }
         Ok(info)
+    }
+
+    /// Injects `MsvAvChannelBindings` (EPA) calculated from a TLS server certificate
+    /// and marks `MSV_AV_FLAG_CHANNEL_BINDING_PRESENT` in `MsvAvFlags` for hardened Active Directory.
+    pub fn with_channel_bindings(mut self, cert_der: &[u8]) -> Self {
+        let hash = cbt::compute_channel_bindings_hash_from_cert(cert_der);
+        cbt::inject_channel_bindings(&mut self, hash);
+        self
     }
 
     /// Serializes `AV_PAIR` list back to wire format, injecting or updating `MsvAvFlags`,
