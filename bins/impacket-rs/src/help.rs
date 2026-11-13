@@ -1363,6 +1363,8 @@ options:
   -user-status           Display user status (disabled/enabled/expired)
   -history               Dump password history
   -resumefile <FILE>     Resume file to read/write for interrupted DCSync
+  -use-vss               Use Volume Shadow Copy (VSS via WMI) to extract locked hives
+  -use-reg, -stealth     Extract BootKey, SAM, and LSA directly in-memory via RRP (zero disk writes)
   -sam <FILE>            Local SAM hive file to parse (LOCAL mode)
   -system <FILE>         Local SYSTEM hive file to parse (LOCAL mode)
   -security <FILE>       Local SECURITY hive file to parse (LOCAL mode)
@@ -1396,6 +1398,31 @@ options:
 
 examples:
   impacket-rs secretsdump-local -sam SAM -system SYSTEM -security SECURITY
+"#),
+        "regsecrets" => Some(r#"Description: Low-artifact remote registry secrets extractor via [MS-RRP]. Reads BootKey, SAM hashes, and LSA secrets directly from remote memory without saving hive files to disk or creating services.
+
+usage: impacket-rs regsecrets [options] <target>
+
+positional arguments:
+  target: [[domain/]username[:password]@]<targetName or address>
+
+options:
+  -h, --help            show this help message and exit
+  -security              also extract LSA secrets and cached domain credentials (DCC2)
+
+authentication:
+  -hashes LMHASH:NTHASH
+                        NTLM hashes, format is LMHASH:NTHASH
+  -no-pass              don't ask for password (useful for -k)
+  -k                    Use Kerberos authentication. Grabs credentials from
+                        ccache file (KRB5CCNAME)
+  -aesKey hex key       AES key to use for Kerberos Authentication (128 or 256 bits)
+  -dc-ip ip address     IP Address of the domain controller
+  -target-ip ip address IP Address of the target machine
+
+examples:
+  impacket-rs regsecrets Administrator:Pass123@192.168.1.10
+  impacket-rs regsecrets corp.local/admin@192.168.1.10 -hashes :aad3b435b51404eeaad3b435b51404ee -security
 "#),
         "services" => Some(r#"Description: Manages remote Windows services via the Service Control Manager (MS-SCMR over \PIPE\svcctl). Query, create, start, stop, pause, and delete services.
 
@@ -1865,6 +1892,8 @@ pub fn canonicalize_name(name: &str) -> &'static str {
         "rpcinterfaces" => "rpc-interfaces",
         "benchndr" => "bench-ndr",
         "secretsdumplocal" => "secretsdump-local",
+        "regsecrets" => "regsecrets",
+        "reg-secrets" => "regsecrets",
         "netfiles" => "netfiles",
         "dumpntlm" => "DumpNTLMInfo",
         "ntlm" => "DumpNTLMInfo",
@@ -1909,7 +1938,7 @@ mod tests {
             "findDelegation", "trueTree", "raiseChild", "smbpasswd", "split",
             "atq", "eventlog", "compat-matrix", "parse-target", "ntlm-hash",
             "krb5-asreq", "smb-negotiate", "rpc-interfaces", "bench-ndr",
-            "secretsdump-local", "netfiles", "smbserver", "smbexec", "dcomexec",
+            "secretsdump-local", "regsecrets", "netfiles", "smbserver", "smbexec", "dcomexec",
         ];
         for tool in tools {
             let help = get_tool_help(tool);

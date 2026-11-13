@@ -17,6 +17,8 @@ pub mod ese;
 pub mod dpapi;
 pub mod ntds;
 pub mod gpp;
+pub mod regsecrets;
+pub mod shadowcopy;
 
 pub use lsa::{LsaCachedLogon, LsaParser, LsaSecretItem};
 pub use ese::{EseDatabase, EseDbHeader, EsePageHeader, EseRecord, EseTableDef, EseValue};
@@ -25,6 +27,11 @@ pub use dpapi::{
 };
 pub use ntds::{NtdsAccount, NtdsParser};
 pub use gpp::{decrypt_cpassword, parse_gpp_xml, GppCredential, GPP_AES_KEY};
+pub use regsecrets::{
+    extract_bootkey_remote, extract_lsa_secrets_remote, extract_sam_hashes_remote,
+    regsecrets_dump, RegSecretsDumpReport,
+};
+pub use shadowcopy::{ShadowCopyConfig, ShadowCopyInfo};
 
 use impacket_core::{
     decode_hex, decode_utf16le, encode_hex, CoreError, NtlmHashes, EMPTY_LM_HASH, EMPTY_NT_HASH,
