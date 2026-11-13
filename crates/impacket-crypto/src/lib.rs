@@ -1,3 +1,10 @@
+#![allow(
+    clippy::manual_is_multiple_of,
+    clippy::chunks_exact_to_as_chunks,
+    clippy::manual_div_ceil,
+    clippy::needless_range_loop
+)]
+
 //! `impacket-crypto`: Pure-Rust cryptographic primitives required across legacy (Windows NT4/2000/2003)
 //! and modern (Windows Server 2008 R2 -> 2025) Active Directory environments.
 //!

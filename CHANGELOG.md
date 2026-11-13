@@ -21,6 +21,35 @@ This project follows **Semantic Versioning 2.0.0 (SemVer)** and the exact change
 
 ---
 
+## [v0.2.0] - 2026-11-13
+
+1. Library & Protocol Improvements
+
+    * **Pure-Rust In-Core SOCKS5 & HTTP CONNECT Proxy Engine (`crates/impacket-core::transport`)**:
+        * Added `TransportStream` abstraction supporting direct TCP, SOCKS5 (RFC 1928 / RFC 1929), and HTTP `CONNECT` (RFC 7231) proxy tunneling without external C or runtime dependencies.
+        * Eliminates `proxychains4` runtime dependency and resolves `LD_PRELOAD` failures on statically linked `musl` binaries.
+        * Added `ProxyConfig` supporting `socks5://[user:pass@]host[:port]`, `socks5h://`, and `http://[user:pass@]host[:port]` URL formats.
+        * Added automatic proxy auto-discovery from environment variables (`ALL_PROXY`, `all_proxy`, `HTTPS_PROXY`, `https_proxy`, `HTTP_PROXY`, `http_proxy`).
+        * Implemented remote SOCKS5 DNS resolution (ATYP `0x03`) to eliminate operator DNS leakage during assessments.
+    * **Full IPv6 Dual-Stack Support (`crates/impacket-core`, `bins/impacket-rs`)**:
+        * Added native IPv6 parsing support for bracketed targets (`[fe80::1]`, `[2001:db8::1]:445`) and unbracketed targets in `TargetSpec`.
+        * Added dual-stack connection fallback in `TransportStream::connect_direct` resolving both IPv6 and IPv4 addresses.
+        * Added `target_port` and `effective_port` helpers to `TargetSpec`.
+    * **Hardened Active Directory LDAP Channel Binding Tokens (CBT) & EPA (`crates/impacket-auth::cbt`, `crates/impacket-ldap`)**:
+        * Implemented RFC 5929 `tls-server-end-point` and `[MS-NLMP]` 3.1.5.1.2 `gss_channel_bindings_struct` token calculation from TLS server certificates.
+        * Added `compute_channel_bindings_hash_from_cert`, `compute_channel_bindings_hash_from_sha256`, and `inject_channel_bindings` injecting CBT hashes into `MsvAvChannelBindings` (0x000A).
+        * Set `MSV_AV_FLAG_CHANNEL_BINDING_PRESENT` (0x00000002) in `MsvAvFlags` when channel bindings are active.
+        * Added `bind_ntlm` in `LdapClient` with automatic SPNEGO NTLM negotiation and certificate channel binding, overcoming Windows Server 2022/2025 `strongAuthRequired` / `LDAPServerIntegrity` rejections.
+        * Added `LdapClient::connect_spec` connecting via `TransportStream` with proxy and IPv6 support.
+    * **Global CLI Flag & Help Engine Integration (`bins/impacket-rs`)**:
+        * Added `-proxy` and `--proxy <URL>` flag parsing to `parse_target_with_hashes` across all 74 subcommands.
+        * Enriched `print_tool_help` in `bins/impacket-rs/src/help.rs` with `global connection options:` documenting proxy tunneling and `--compat` for all 74 tools.
+        * Enriched `print_usage` in `bins/impacket-rs/src/main.rs` with global options documentation.
+    * **Developer Library Example**:
+        * Added `bins/impacket-rs/examples/transport_proxy.rs` demonstrating `TransportStream`, `ProxyConfig`, and in-process mock SOCKS5 proxy verification.
+
+---
+
 ## [v0.1.1] - 2026-11-13
 
 1. Library & CLI Improvements
