@@ -75,7 +75,7 @@
   <circle cx="60" cy="19" r="6" class="btn-max" />
 
   <!-- Window Title -->
-  <text x="425" y="23" text-anchor="middle" class="title-text">impacket-rs (v0.1.0-dev) — High-Performance Protocol Engine</text>
+  <text x="425" y="23" text-anchor="middle" class="title-text">impacket-rs (v0.1.0) — High-Performance Protocol Engine</text>
 
   <!-- Terminal Body Content -->
   <g class="term-text">

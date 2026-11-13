@@ -21,7 +21,7 @@ This project follows **Semantic Versioning 2.0.0 (SemVer)** and the exact change
 
 ---
 
-## Unreleased (`v0.1.0-dev`):
+## [v0.1.0] - 2026-11-13
 
 1. Library improvements
 
