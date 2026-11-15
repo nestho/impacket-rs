@@ -129,7 +129,7 @@ examples:
   impacket-rs GetADUsers corp.local/jdoe:Pass123!@192.168.1.10 -all
   impacket-rs GetADUsers corp.local/jdoe@192.168.1.10 -hashes :aad3b435b51404eeaad3b435b51404ee
 "#),
-        "GetLAPSPassword" => Some(r#"Description: Queries Active Directory via LDAP for legacy LAPS and modern Windows LAPS administrator passwords.
+        "GetLAPSPassword" => Some(r#"Description: Queries Active Directory via LDAP for legacy LAPS and modern Windows LAPS v2 administrator passwords, with automatic MS-GKDI / DPAPI-NG decryption.
 
 usage: impacket-rs GetLAPSPassword [options] <target>
 
@@ -139,6 +139,8 @@ positional arguments:
 options:
   -h, --help            show this help message and exit
   -computer <NAME>       Computer account name to retrieve LAPS password for
+  -l2key <HEX>          Manual 64-byte MS-GKDI L2 seed key for offline decryption
+  -history              Also query and decrypt msLAPS-EncryptedPasswordHistory
 
 authentication:
   -hashes LMHASH:NTHASH
@@ -153,6 +155,8 @@ authentication:
 
 examples:
   impacket-rs GetLAPSPassword corp.local/admin:Pass123!@192.168.1.10 -computer DC01
+  impacket-rs GetLAPSPassword corp.local/admin:Pass123!@192.168.1.10 -history
+  impacket-rs GetLAPSPassword corp.local/admin@192.168.1.10 -hashes :e6fb06210f57e7af5f0ac888128a96db -l2key <64_BYTE_HEX>
 "#),
         "GetNPUsers" => Some(r#"Description: Queries Active Directory for accounts with 'Do not require Kerberos preauthentication' (DONT_REQ_PREAUTH) enabled and requests AS-REP ciphertexts to crack offline (AS-REP Roasting).
 

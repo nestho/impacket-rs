@@ -17,9 +17,13 @@ pub mod ese;
 pub mod dpapi;
 pub mod ntds;
 pub mod gpp;
+pub mod laps;
 pub mod regsecrets;
 pub mod shadowcopy;
 
+pub use laps::{
+    decrypt_laps_blob, parse_laps_json, LapsEncryptedBlob, LapsPasswordResult,
+};
 pub use lsa::{LsaCachedLogon, LsaParser, LsaSecretItem};
 pub use ese::{EseDatabase, EseDbHeader, EsePageHeader, EseRecord, EseTableDef, EseValue};
 pub use dpapi::{

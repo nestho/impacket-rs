@@ -48,7 +48,8 @@ use impacket_msrpc::{
     samr_user_access,
     scmr::{access as scmr_access, service_state, service_type, start_type},
     srvs::SrvsClient,
-    start_type_str, ScmrClient, SmbPipeTransport, TschClient, WkstClient,
+    start_type_str, GkdiClient, ScmrClient, SmbPipeTransport, TschClient, WkstClient,
+    GKDI_INTERFACE_UUID, GKDI_VERSION_MAJOR, GKDI_VERSION_MINOR,
 };
 use impacket_mssql::{MssqlClient, QueryResult};
 use impacket_ndr::{
@@ -9643,7 +9644,7 @@ fn cmd_smbserver(args: &[String]) {
 
 fn cmd_get_laps_password(args: &[String]) {
     if args.is_empty() {
-        eprintln!("Usage: impacket-rs GetLAPSPassword <TARGET> [-computer <NAME>] [-port <PORT>]");
+        eprintln!("Usage: impacket-rs GetLAPSPassword <TARGET> [-computer <NAME>] [-port <PORT>] [-l2key <HEX>] [-history]");
         std::process::exit(1);
     }
     let spec = match parse_target_with_hashes(args) {
@@ -9655,6 +9656,8 @@ fn cmd_get_laps_password(args: &[String]) {
     };
     let mut port: u16 = 389;
     let mut target_computer: Option<String> = None;
+    let mut manual_l2_key: Option<Vec<u8>> = None;
+    let mut include_history = false;
     let mut i = 1;
     while i < args.len() {
         match args[i].as_str() {
@@ -9667,6 +9670,20 @@ fn cmd_get_laps_password(args: &[String]) {
                     port = p;
                 }
                 i += 2;
+            }
+            "-l2key" if i + 1 < args.len() => {
+                match impacket_core::decode_hex(&args[i + 1]) {
+                    Ok(k) => manual_l2_key = Some(k),
+                    Err(e) => {
+                        eprintln!("[-] Invalid hex string for -l2key: {}", e);
+                        std::process::exit(1);
+                    }
+                }
+                i += 2;
+            }
+            "-history" => {
+                include_history = true;
+                i += 1;
             }
             _ => i += 1,
         }
@@ -9719,6 +9736,8 @@ fn cmd_get_laps_password(args: &[String]) {
             filter_or(&[
                 filter_present("ms-Mcs-AdmPwd"),
                 filter_present("msLAPS-Password"),
+                filter_present("msLAPS-EncryptedPassword"),
+                filter_present("msLAPS-EncryptedPasswordHistory"),
             ]),
         ])
     };
@@ -9730,6 +9749,8 @@ fn cmd_get_laps_password(args: &[String]) {
         "ms-Mcs-AdmPwdExpirationTime",
         "msLAPS-Password",
         "msLAPS-PasswordExpirationTime",
+        "msLAPS-EncryptedPassword",
+        "msLAPS-EncryptedPasswordHistory",
     ];
     println!("[*] Querying LAPS and Windows LAPS attributes under '{}'...", base_dn);
     let entries = match client.search(&base_dn, SearchScope::WholeSubtree, &filter, &attributes) {
@@ -9744,21 +9765,79 @@ fn cmd_get_laps_password(args: &[String]) {
         println!("[-] No LAPS passwords found matching query.");
         return;
     }
-    println!("\n{:<25} {:<16} {:<30} {:<24}", "Computer Name", "LAPS Type", "Password", "Expiration");
-    println!("{:-<25} {:-<16} {:-<30} {:-<24}", "", "", "", "");
+
+    let cred = credential_from(&spec).map_err(CoreError::ProtocolError);
+    let mut l2_cache: std::collections::HashMap<([u8; 16], i32, i32, i32), Vec<u8>> =
+        std::collections::HashMap::new();
+
+    let mut resolve_l2_key = |root_id: &[u8; 16], l0: i32, l1: i32, l2: i32| -> Result<Vec<u8>, CoreError> {
+        if let Some(ref k) = manual_l2_key {
+            return Ok(k.clone());
+        }
+        let cache_key = (*root_id, l0, l1, l2);
+        if let Some(k) = l2_cache.get(&cache_key) {
+            return Ok(k.clone());
+        }
+        let cred_val = match &cred {
+            Ok(c) => c,
+            Err(e) => {
+                return Err(CoreError::ProtocolError(format!(
+                    "Cannot connect to DC MS-GKDI without credentials: {}",
+                    e
+                )))
+            }
+        };
+        println!("[*] Connecting to DC over MS-GKDI (\\PIPE\\protected_storage) to fetch L2 key...");
+        let mut transport = SmbPipeTransport::connect(
+            host,
+            &spec.domain,
+            &spec.username,
+            cred_val,
+            "protected_storage",
+            GKDI_INTERFACE_UUID,
+            GKDI_VERSION_MAJOR,
+            GKDI_VERSION_MINOR,
+            spec.compat_profile,
+            DEFAULT_TIMEOUT,
+        )?;
+        let mut gkdi = GkdiClient::new(&mut transport);
+        let env = gkdi.get_key(None, Some(root_id), l0, l1, l2)?;
+        match env.l2_key {
+            Some(k) => {
+                println!("[+] Successfully retrieved L2 key from DC KDS service ({} bytes)", k.len());
+                l2_cache.insert(cache_key, k.clone());
+                Ok(k)
+            }
+            None => Err(CoreError::ProtocolError(
+                "GKDI response did not contain an L2 key".into(),
+            )),
+        }
+    };
+
+    println!("\n{:<25} {:<24} {:<30} {:<24}", "Computer Name", "LAPS Type", "Password", "Expiration");
+    println!("{:-<25} {:-<24} {:-<30} {:-<24}", "", "", "", "");
     for entry in entries {
         let sam = entry.get_string("sAMAccountName").unwrap_or_else(|| "<unknown>".into());
         let dns = entry.get_string("dNSHostName").unwrap_or(sam);
 
+        // 1. Legacy LAPS
         if let Some(pwd) = entry.get_string("ms-Mcs-AdmPwd") {
             let exp_raw = entry.get_string("ms-Mcs-AdmPwdExpirationTime").unwrap_or_default();
             let exp_str = format_filetime_str(&exp_raw);
-            println!("{:<25} {:<16} {:<30} {:<24}", dns, "Legacy LAPS", pwd, exp_str);
+            println!("{:<25} {:<24} {:<30} {:<24}", dns, "Legacy LAPS", pwd, exp_str);
         }
+
+        // 2. Cleartext Windows LAPS
         if let Some(laps_pwd) = entry.get_string("msLAPS-Password") {
             let exp_raw = entry.get_string("msLAPS-PasswordExpirationTime").unwrap_or_default();
             let exp_str = format_filetime_str(&exp_raw);
-            let disp_pwd = if let Some(p_idx) = laps_pwd.find(r#""p":""#) {
+            let disp_pwd = if let Ok(parsed) = impacket_sam::parse_laps_json(&laps_pwd, 0) {
+                if !parsed.password.is_empty() {
+                    parsed.password
+                } else {
+                    laps_pwd
+                }
+            } else if let Some(p_idx) = laps_pwd.find(r#""p":""#) {
                 let rest = &laps_pwd[p_idx + 5..];
                 if let Some(end_idx) = rest.find('"') {
                     rest[..end_idx].to_string()
@@ -9768,7 +9847,65 @@ fn cmd_get_laps_password(args: &[String]) {
             } else {
                 laps_pwd
             };
-            println!("{:<25} {:<16} {:<30} {:<24}", dns, "Windows LAPS", disp_pwd, exp_str);
+            println!("{:<25} {:<24} {:<30} {:<24}", dns, "Windows LAPS", disp_pwd, exp_str);
+        }
+
+        // 3. Encrypted Windows LAPS v2
+        if let Some(enc_bytes) = entry.get_first_raw("msLAPS-EncryptedPassword") {
+            match impacket_sam::LapsEncryptedBlob::parse(enc_bytes) {
+                Ok(blob) => {
+                    let exp_raw = entry.get_string("msLAPS-PasswordExpirationTime").unwrap_or_default();
+                    let exp_str = format_filetime_str(&exp_raw);
+                    match resolve_l2_key(&blob.root_key_id, blob.l0_index, blob.l1_index, blob.l2_index) {
+                        Ok(l2_key) => {
+                            match impacket_sam::decrypt_laps_blob(&blob, &l2_key) {
+                                Ok(res) => {
+                                    let disp_type = if !res.account_name.is_empty() {
+                                        format!("Windows LAPS ({})", res.account_name)
+                                    } else {
+                                        "Windows LAPS v2".into()
+                                    };
+                                    println!("{:<25} {:<24} {:<30} {:<24}", dns, disp_type, res.password, exp_str);
+                                }
+                                Err(e) => {
+                                    println!("{:<25} {:<24} {:<30} {:<24}", dns, "Windows LAPS v2", format!("[Decrypt error: {}]", e), exp_str);
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            println!("{:<25} {:<24} {:<30} {:<24}", dns, "Windows LAPS v2", format!("[GKDI error: {}]", e), exp_str);
+                        }
+                    }
+                }
+                Err(e) => {
+                    println!("{:<25} {:<24} {:<30} {:<24}", dns, "Windows LAPS v2", format!("[Parse error: {}]", e), "");
+                }
+            }
+        }
+
+        // 4. Encrypted Windows LAPS v2 History
+        if include_history {
+            if let Some(hist_slices) = entry.get_raw("msLAPS-EncryptedPasswordHistory") {
+                for hist_bytes in hist_slices {
+                    if let Ok(blob) = impacket_sam::LapsEncryptedBlob::parse(hist_bytes) {
+                        let exp_str = if blob.timestamp != 0 {
+                            format_filetime_str(&blob.timestamp.to_string())
+                        } else {
+                            "<history>".into()
+                        };
+                        if let Ok(l2_key) = resolve_l2_key(&blob.root_key_id, blob.l0_index, blob.l1_index, blob.l2_index) {
+                            if let Ok(res) = impacket_sam::decrypt_laps_blob(&blob, &l2_key) {
+                                let disp_type = if !res.account_name.is_empty() {
+                                    format!("LAPS Hist ({})", res.account_name)
+                                } else {
+                                    "Windows LAPS Hist".into()
+                                };
+                                println!("{:<25} {:<24} {:<30} {:<24}", dns, disp_type, res.password, exp_str);
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }

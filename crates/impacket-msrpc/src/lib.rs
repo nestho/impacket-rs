@@ -20,6 +20,7 @@ pub mod efsr;
 pub mod even6;
 pub mod exec;
 pub mod fsrvp;
+pub mod gkdi;
 pub mod lsat;
 pub mod mgmt;
 pub mod rprn;
@@ -44,6 +45,10 @@ pub use even6::{Even6Client, EvtEventRecord, EVEN6_INTERFACE_UUID, EVEN6_NAMED_P
 pub use exec::{atexec, dcomexec, psexec, smbexec, wmiexec, DcomObject};
 pub use fsrvp::{
     FsrvpClient, FSRVP_INTERFACE_UUID, FSRVP_PIPE, FSRVP_VERSION_MAJOR, FSRVP_VERSION_MINOR,
+};
+pub use gkdi::{
+    GkdiClient, GroupKeyEnvelope, GKDI_INTERFACE_UUID, GKDI_PIPE, GKDI_VERSION_MAJOR,
+    GKDI_VERSION_MINOR,
 };
 pub use lsat::{LsatClient, SidNameUse, TranslatedName};
 pub use mgmt::{

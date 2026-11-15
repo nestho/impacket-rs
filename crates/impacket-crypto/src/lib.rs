@@ -1509,6 +1509,104 @@ pub fn crc32(data: &[u8]) -> u32 {
     !crc
 }
 
+/// RFC 3394 / NIST SP 800-38F AES Key Wrap for 128-bit or 256-bit KEK.
+pub fn aes_key_wrap(kek: &[u8], plaintext: &[u8]) -> Result<Vec<u8>, impacket_core::CoreError> {
+    if plaintext.len() < 16 || plaintext.len() % 8 != 0 {
+        return Err(impacket_core::CoreError::ProtocolError("Invalid plaintext length for AES Key Wrap".into()));
+    }
+    let n = plaintext.len() / 8;
+    let mut a = [0xA6u8, 0xA6, 0xA6, 0xA6, 0xA6, 0xA6, 0xA6, 0xA6];
+    let mut r: Vec<[u8; 8]> = Vec::with_capacity(n);
+    for chunk in plaintext.chunks_exact(8) {
+        let mut b = [0u8; 8];
+        b.copy_from_slice(chunk);
+        r.push(b);
+    }
+
+    for j in 0..=5 {
+        for i in 1..=n {
+            let mut block = [0u8; 16];
+            block[..8].copy_from_slice(&a);
+            block[8..].copy_from_slice(&r[i - 1]);
+            let enc = if kek.len() == 32 {
+                let mut k = [0u8; 32];
+                k.copy_from_slice(kek);
+                aes256::encrypt_block(&k, &block)
+            } else if kek.len() == 16 {
+                let mut k = [0u8; 16];
+                k.copy_from_slice(kek);
+                aes128::encrypt_block(&k, &block)
+            } else {
+                return Err(impacket_core::CoreError::ProtocolError("Invalid KEK length for AES Key Wrap (must be 16 or 32 bytes)".into()));
+            };
+            a.copy_from_slice(&enc[..8]);
+            let t = ((n * j + i) as u64).to_be_bytes();
+            for k in 0..8 {
+                a[k] ^= t[k];
+            }
+            r[i - 1].copy_from_slice(&enc[8..]);
+        }
+    }
+
+    let mut out = Vec::with_capacity((n + 1) * 8);
+    out.extend_from_slice(&a);
+    for block in r {
+        out.extend_from_slice(&block);
+    }
+    Ok(out)
+}
+
+/// RFC 3394 / NIST SP 800-38F AES Key Unwrap for 128-bit or 256-bit KEK.
+pub fn aes_key_unwrap(kek: &[u8], ciphertext: &[u8]) -> Result<Vec<u8>, impacket_core::CoreError> {
+    if ciphertext.len() < 24 || ciphertext.len() % 8 != 0 {
+        return Err(impacket_core::CoreError::ProtocolError("Invalid ciphertext length for AES Key Unwrap".into()));
+    }
+    let n = (ciphertext.len() / 8) - 1;
+    let mut a = [0u8; 8];
+    a.copy_from_slice(&ciphertext[..8]);
+    let mut r: Vec<[u8; 8]> = Vec::with_capacity(n);
+    for chunk in ciphertext[8..].chunks_exact(8) {
+        let mut b = [0u8; 8];
+        b.copy_from_slice(chunk);
+        r.push(b);
+    }
+
+    for j in (0..=5).rev() {
+        for i in (1..=n).rev() {
+            let t = ((n * j + i) as u64).to_be_bytes();
+            for k in 0..8 {
+                a[k] ^= t[k];
+            }
+            let mut block = [0u8; 16];
+            block[..8].copy_from_slice(&a);
+            block[8..].copy_from_slice(&r[i - 1]);
+            let dec = if kek.len() == 32 {
+                let mut k = [0u8; 32];
+                k.copy_from_slice(kek);
+                aes256::decrypt_block(&k, &block)
+            } else if kek.len() == 16 {
+                let mut k = [0u8; 16];
+                k.copy_from_slice(kek);
+                aes128::decrypt_block(&k, &block)
+            } else {
+                return Err(impacket_core::CoreError::ProtocolError("Invalid KEK length for AES Key Unwrap (must be 16 or 32 bytes)".into()));
+            };
+            a.copy_from_slice(&dec[..8]);
+            r[i - 1].copy_from_slice(&dec[8..]);
+        }
+    }
+
+    if a != [0xA6, 0xA6, 0xA6, 0xA6, 0xA6, 0xA6, 0xA6, 0xA6] {
+        return Err(impacket_core::CoreError::ProtocolError("AES Key Unwrap integrity verification failed (bad KEK or corrupted payload)".into()));
+    }
+
+    let mut out = Vec::with_capacity(n * 8);
+    for block in r {
+        out.extend_from_slice(&block);
+    }
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1695,5 +1793,63 @@ mod tests {
             encode_hex(&hmac),
             "87aa7cdea5ef619d4ff0b4241a1d6cb02379f4e2ce4ec2787ad0b30545e17cdedaa833b7d6b8a702038b274eaea3f4e4be9d914eeb61f1702e696c203a126854"
         );
+    }
+
+    #[test]
+    fn test_rfc3394_key_wrap_unwrap() {
+        // RFC 3394 Section 4.1: 128-bit KEK, 128-bit key data
+        let kek128 = [
+            0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
+            0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f,
+        ];
+        let key_data = [
+            0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77,
+            0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff,
+        ];
+        let expected128 = [
+            0x1f, 0xa6, 0x8b, 0x0a, 0x81, 0x12, 0xb4, 0x47,
+            0xae, 0xf3, 0x4b, 0xd8, 0xfb, 0x5a, 0x7b, 0x82,
+            0x9d, 0x3e, 0x86, 0x23, 0x71, 0xd2, 0xcf, 0xe5,
+        ];
+        let wrapped128 = aes_key_wrap(&kek128, &key_data).expect("aes_key_wrap 128 failed");
+        assert_eq!(wrapped128, expected128);
+
+        let unwrapped128 = aes_key_unwrap(&kek128, &wrapped128).expect("aes_key_unwrap 128 failed");
+        assert_eq!(unwrapped128, key_data);
+
+        // RFC 3394 Section 4.3: 256-bit KEK, 128-bit key data
+        let kek256 = [
+            0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
+            0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f,
+            0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17,
+            0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f,
+        ];
+        let expected256 = [
+            0x64, 0xe8, 0xc3, 0xf9, 0xce, 0x0f, 0x5b, 0xa2,
+            0x63, 0xe9, 0x77, 0x79, 0x05, 0x81, 0x8a, 0x2a,
+            0x93, 0xc8, 0x19, 0x1e, 0x7d, 0x6e, 0x8a, 0xe7,
+        ];
+        let wrapped256 = aes_key_wrap(&kek256, &key_data).expect("aes_key_wrap 256 failed");
+        assert_eq!(wrapped256, expected256);
+
+        let unwrapped256 = aes_key_unwrap(&kek256, &wrapped256).expect("aes_key_unwrap 256 failed");
+        assert_eq!(unwrapped256, key_data);
+
+        // Tampering test: ensure unwrap fails integrity check
+        let mut tampered = wrapped256.clone();
+        tampered[0] ^= 0x01;
+        assert!(aes_key_unwrap(&kek256, &tampered).is_err());
+    }
+
+    #[test]
+    fn test_sp800_108_counter_kdf() {
+        let key = [0x42u8; 32];
+        let label = b"KDS service\0";
+        let context = [0x01, 0x02, 0x03, 0x04];
+        let derived = sp800_108_counter_kdf(&key, label, &context, 32);
+        assert_eq!(derived.len(), 32);
+        // Deterministic output check
+        let derived2 = sp800_108_counter_kdf(&key, label, &context, 32);
+        assert_eq!(derived, derived2);
     }
 }
