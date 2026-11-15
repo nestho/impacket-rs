@@ -149,6 +149,21 @@ This project follows **Semantic Versioning 2.0.0 (SemVer)** and the exact change
         * Added `-history` flag to discover and decrypt all historical password rotations.
         * Updated command help documentation and usage examples.
 
+7. Active Directory Group Managed Service Accounts (gMSA) Engine (`crates/impacket-sam`, `crates/impacket-krb5` & Phase 3)
+
+    * **`[MS-ADTS]` Section 2.2.14 `MSDS-MANAGEDPASSWORD_BLOB` Codec (`crates/impacket-sam::gmsa`)**:
+        * Implemented pure-Rust binary decoder and encoder for `MSDS-MANAGEDPASSWORD_BLOB` from Active Directory constructed attribute `msDS-ManagedPassword`.
+        * Extracts current cleartext Unicode password, previous cleartext password (if retained), and computes respective NT hashes.
+        * Extracts and formats `QueryPasswordInterval` and `UnchangedPasswordInterval` 64-bit 100ns tick rotation schedules.
+        * Implemented bidirectional serialization (`ManagedPasswordBlob::to_bytes`) and comprehensive unit tests.
+    * **`getGMSAPassword` CLI Tool & Kerberos Key Derivation (`bins/impacket-rs`)**:
+        * Added `getGMSAPassword <TARGET> [options]` CLI subcommand with aliases `gmsadumper` and `gmsa`.
+        * Supports live LDAP queries for `(objectClass=msDS-GroupManagedServiceAccount)` targets with optional `-account <NAME>` filter.
+        * Implemented offline inspection mode via `-raw <HEX>` to decode raw blobs without network access.
+        * Computes Kerberos AES-256 and AES-128 keys from extracted passwords and domain/account salts (`DOMAINsAMAccountName`).
+        * Implemented automatic fallback parsing of `msDS-GroupMSAMembership` SecurityDescriptor DACL to list authorized principal SIDs upon access denial.
+        * Integrated into global help system with parameter validation and automated help coverage tests.
+
 ---
 
 ## [v0.2.1] - 2026-11-13
