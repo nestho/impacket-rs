@@ -48,7 +48,8 @@ use impacket_msrpc::{
     samr_user_access,
     scmr::{access as scmr_access, service_state, service_type, start_type},
     srvs::SrvsClient,
-    start_type_str, GkdiClient, ScmrClient, SmbPipeTransport, TschClient, WkstClient,
+    start_type_str, BkrpClient, GkdiClient, ScmrClient, SmbPipeTransport, TschClient, WkstClient,
+    BKRP_INTERFACE_UUID, BKRP_VERSION_MAJOR, BKRP_VERSION_MINOR,
     GKDI_INTERFACE_UUID, GKDI_VERSION_MAJOR, GKDI_VERSION_MINOR,
 };
 use impacket_mssql::{MssqlClient, QueryResult};
@@ -2582,11 +2583,29 @@ fn cmd_ntdsdump(args: &[String]) {
 fn cmd_dpapi(args: &[String]) {
     use impacket_core::decode_hex;
     print!("{}", version::BANNER);
+    if args.is_empty() {
+        eprintln!("[-] usage: dpapi <masterkey|blob|backupkeys|unprotect> [options]");
+        std::process::exit(1);
+    }
+    let mode = args[0].to_lowercase();
+    if mode == "backupkeys" || mode == "backupkey" || mode == "bkrp" {
+        cmd_backupkey(&args[1..]);
+        return;
+    }
+    if mode == "unprotect" || mode == "restore" {
+        if args.len() < 3 {
+            eprintln!("[-] usage: dpapi unprotect <MASTERKEY_FILE> <TARGET>");
+            std::process::exit(1);
+        }
+        let mut restore_args = vec![args[2].clone(), "-restore".into(), args[1].clone()];
+        restore_args.extend_from_slice(&args[3..]);
+        cmd_backupkey(&restore_args);
+        return;
+    }
     if args.len() < 2 {
         eprintln!("[-] usage: dpapi <masterkey|blob> <FILE> [-key <HEX_KEY>]");
         std::process::exit(1);
     }
-    let mode = args[0].to_lowercase();
     let file_bytes = match std::fs::read(&args[1]) {
         Ok(b) => b,
         Err(e) => {
@@ -2694,6 +2713,153 @@ fn cmd_dpapi(args: &[String]) {
         _ => {
             eprintln!("[-] unknown mode '{}', expected 'masterkey' or 'blob'", mode);
             std::process::exit(1);
+        }
+    }
+}
+
+fn cmd_backupkey(args: &[String]) {
+    if args.is_empty() {
+        eprintln!("Usage: impacket-rs backupkey <TARGET> [-export <PREFIX>] [-restore <FILE>]");
+        std::process::exit(1);
+    }
+
+    let mut export_prefix: Option<String> = None;
+    let mut restore_file: Option<String> = None;
+
+    let mut i = 1;
+    while i < args.len() {
+        match args[i].as_str() {
+            "-export" if i + 1 < args.len() => {
+                export_prefix = Some(args[i + 1].clone());
+                i += 2;
+            }
+            "-restore" if i + 1 < args.len() => {
+                restore_file = Some(args[i + 1].clone());
+                i += 2;
+            }
+            _ => i += 1,
+        }
+    }
+
+    let spec = match parse_target_with_hashes(args) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("[-] Error parsing target: {}", e);
+            std::process::exit(1);
+        }
+    };
+
+    let cred = match credential_from(&spec) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("[-] Authentication error: {}", e);
+            std::process::exit(1);
+        }
+    };
+
+    let host = spec.effective_target_ip();
+    println!("[*] Connecting to DC over MS-BKRP (\\PIPE\\protected_storage) at {}...", host);
+    let mut transport = match SmbPipeTransport::connect(
+        host,
+        &spec.domain,
+        &spec.username,
+        &cred,
+        "protected_storage",
+        BKRP_INTERFACE_UUID,
+        BKRP_VERSION_MAJOR,
+        BKRP_VERSION_MINOR,
+        spec.compat_profile,
+        DEFAULT_TIMEOUT,
+    ) {
+        Ok(t) => t,
+        Err(e) => {
+            eprintln!("[-] Failed to connect to MS-BKRP endpoint: {}", e);
+            std::process::exit(1);
+        }
+    };
+
+    let mut bkrp = BkrpClient::new(&mut transport);
+
+    // 1. If -restore <FILE> specified, unwrap MasterKey
+    if let Some(ref path) = restore_file {
+        println!("[*] Reading MasterKey file '{}'...", path);
+        let file_bytes = match std::fs::read(path) {
+            Ok(b) => b,
+            Err(e) => {
+                eprintln!("[-] Cannot read MasterKey file: {}", e);
+                std::process::exit(1);
+            }
+        };
+
+        let mkf = match impacket_sam::MasterKeyFile::parse(&file_bytes) {
+            Ok(m) => m,
+            Err(e) => {
+                eprintln!("[-] Failed to parse MasterKeyFile header: {}", e);
+                std::process::exit(1);
+            }
+        };
+
+        println!("[+] Target MasterKey GUID: {}", mkf.guid);
+        let wrapped_data = if !mkf.domain_key_bytes.is_empty() {
+            println!("[*] Using DomainKey ({} bytes) for unwrapping...", mkf.domain_key_bytes.len());
+            &mkf.domain_key_bytes
+        } else if !mkf.backup_key_bytes.is_empty() {
+            println!("[*] Using BackupKey ({} bytes) for unwrapping...", mkf.backup_key_bytes.len());
+            &mkf.backup_key_bytes
+        } else {
+            eprintln!("[-] MasterKey file has neither DomainKey nor BackupKey payload");
+            std::process::exit(1);
+        };
+
+        println!("[*] Requesting Domain Controller to unwrap MasterKey via BACKUPKEY_RESTORE_GUID...");
+        match bkrp.restore_master_key(wrapped_data) {
+            Ok(unwrapped) => {
+                println!("[+] Successfully unwrapped MasterKey via Domain Controller!");
+                println!("[+] Decrypted 64-byte MasterKey: {}", impacket_core::encode_hex(&unwrapped));
+            }
+            Err(e) => {
+                eprintln!("[-] Failed to restore MasterKey: {}", e);
+                std::process::exit(1);
+            }
+        }
+    }
+
+    // 2. Query Domain Backup Public Certificate
+    println!("[*] Querying Domain Backup Key Certificate via BACKUPKEY_RETRIEVE_BACKUP_KEY_GUID...");
+    match bkrp.retrieve_backup_key() {
+        Ok(cert_der) => {
+            println!("[+] Successfully retrieved Domain Backup Key Certificate ({} bytes)", cert_der.len());
+            if let Some(ref prefix) = export_prefix {
+                let der_path = format!("{}.der", prefix);
+                let crt_path = format!("{}.crt", prefix);
+
+                if let Err(e) = std::fs::write(&der_path, &cert_der) {
+                    eprintln!("[-] Failed to write DER certificate to '{}': {}", der_path, e);
+                } else {
+                    println!("[+] Saved DER certificate to '{}'", der_path);
+                }
+
+                let b64 = impacket_core::encode_base64(&cert_der);
+                let mut pem = String::from("-----BEGIN CERTIFICATE-----\n");
+                for chunk in b64.as_bytes().chunks(64) {
+                    if let Ok(line) = std::str::from_utf8(chunk) {
+                        pem.push_str(line);
+                        pem.push('\n');
+                    }
+                }
+                pem.push_str("-----END CERTIFICATE-----\n");
+
+                if let Err(e) = std::fs::write(&crt_path, pem) {
+                    eprintln!("[-] Failed to write PEM certificate to '{}': {}", crt_path, e);
+                } else {
+                    println!("[+] Saved PEM certificate to '{}'", crt_path);
+                }
+            } else {
+                println!("[*] To export certificate to disk, use: -export <PREFIX>");
+            }
+        }
+        Err(e) => {
+            eprintln!("[-] Failed to retrieve Domain Backup Key Certificate: {}", e);
         }
     }
 }
@@ -13059,6 +13225,7 @@ fn main() {
         Some("ntdsdump") | Some("ntds-dump") => cmd_ntdsdump(&args[1..]),
         Some("esentutl") => cmd_esentutl(&args[1..]),
         Some("dpapi") => cmd_dpapi(&args[1..]),
+        Some("backupkey") | Some("backupkeys") | Some("bkrp") => cmd_backupkey(&args[1..]),
         Some("Get-GPPPassword")
         | Some("get-gpppassword")
         | Some("get-gpp-password")
@@ -13159,5 +13326,20 @@ mod tests {
         let aes128 = string_to_key_aes128(&parsed.current_password, &salt, 4096);
         assert_eq!(aes256.len(), 32);
         assert_eq!(aes128.len(), 16);
+    }
+
+    #[test]
+    fn test_backupkey_action_guid_constants_and_stub() {
+        use impacket_msrpc::bkrp::{
+            build_backupr_key_stub, BACKUPKEY_BACKUP_GUID, BACKUPKEY_RESTORE_GUID,
+            BACKUPKEY_RESTORE_GUID_WIN2K, BACKUPKEY_RETRIEVE_BACKUP_KEY_GUID,
+        };
+        assert_eq!(BACKUPKEY_RETRIEVE_BACKUP_KEY_GUID.len(), 16);
+        assert_eq!(BACKUPKEY_RESTORE_GUID.len(), 16);
+        assert_eq!(BACKUPKEY_BACKUP_GUID.len(), 16);
+        assert_eq!(BACKUPKEY_RESTORE_GUID_WIN2K.len(), 16);
+
+        let stub = build_backupr_key_stub(&BACKUPKEY_RETRIEVE_BACKUP_KEY_GUID, None, 0);
+        assert!(!stub.is_empty());
     }
 }
