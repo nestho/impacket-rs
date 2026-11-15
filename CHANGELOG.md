@@ -183,6 +183,18 @@ This project follows **Semantic Versioning 2.0.0 (SemVer)** and the exact change
         * Enhanced `dpapi` command supporting `dpapi backupkeys <TARGET>` and `dpapi unprotect <MASTERKEY_FILE> <TARGET>`.
         * Integrated into global help registry with automated help flag verification tests.
 
+9. Kerberoasting Suite Upgrades & AES-128/AES-256 Support (`GetUserSPNs` & `bins/impacket-rs`)
+
+    * **Kerberos Encryption Type Negotiation (`GetUserSPNs`)**:
+        * Added `-aes` flag to request modern AES-256 (`etype 18`) and AES-128 (`etype 17`) Kerberoast service tickets for domains with RC4 disabled.
+        * Added `-etype <rc4|aes128|aes256|aes|all>` option allowing precise selection of requested ticket cipher suites.
+        * Formats output for Hashcat mode 13100 (`$krb5tgs$23$`), mode 19600 (`$krb5tgs$17$`), and mode 19700 (`$krb5tgs$18$`).
+    * **Target Filtering & File Export (`GetUserSPNs`)**:
+        * Added `-user <NAME>` and `-request-user <NAME>` to filter discovered SPN accounts and request tickets for a specific user.
+        * Added `-outputfile <FILE>` (or `-o <FILE>`) writing/appending captured Hashcat tickets directly into an output file for offline cracking pipelines.
+        * Added comprehensive unit test coverage for argument parsing, encryption type selection, and error handling.
+        * Updated command help documentation and usage examples.
+
 ---
 
 ## [v0.2.1] - 2026-11-13
