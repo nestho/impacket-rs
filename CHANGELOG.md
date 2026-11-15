@@ -23,7 +23,35 @@ This project follows **Semantic Versioning 2.0.0 (SemVer)** and the exact change
 
 ## [Unreleased]
 
-Active development for Phase 4 (v1.0.0 roadmap: BloodHound CE integration, machine-readable telemetry, C ABI & ecosystem).
+1. BloodHound CE (v5+) Collector & Ingestor Suite (`crates/impacket-ldap::bloodhound`)
+
+    * **BloodHound CE v5 Complete Schema**:
+        * Implemented schema models for `BloodHoundUser`, `BloodHoundComputer`, `BloodHoundGroup`, `BloodHoundDomain`, `BloodHoundAce`, `BloodHoundTrust`, and `BloodHoundGroupMember`.
+        * Added full metadata headers (`meta.methods: 0`, `meta.type`, `meta.count`, `meta.version: 5`).
+        * Implemented pure-Rust in-memory uncompressed PKZIP archive packager (`write_to_zip_file`, `to_zip_bytes`) with IEEE 802.3 CRC32 verification.
+    * **Active Directory LDAP Data Collectors**:
+        * Added `collect_users`, `collect_computers`, `collect_groups`, `collect_domains`, and unified `collect_bloodhound_data`.
+        * Extracted ACLs and security descriptors (`parse_entry_aces`), Resource-Based Constrained Delegation (`msDS-AllowedToActOnBehalfOfOtherIdentity`), unconstrained/constrained delegation, AdminCount, and SID histories.
+    * **CLI Ingestor & Export Subcommands (`bins/impacket-rs`)**:
+        * Added `bloodhound <TARGET> [-o PATH] [-zip] [-json] [-base DN]` CLI subcommand.
+        * Added `-format <text|json|bloodhound>`, `-json`, and `-bloodhound` (`-bh`) flags to `GetADUsers` and `GetADComputers`.
+        * Added `-json` flag to `DumpNTLMInfo` for machine-readable SMB2/3 dialect and NTLM target info output.
+
+2. C ABI & Foreign Function Interface (FFI) Bindings (`crates/impacket-cabi`)
+
+    * **C Library & Header Distribution**:
+        * Created `crates/impacket-cabi` compiling to static library (`libimpacket.a`), dynamic library (`libimpacket.so` / `libimpacket.dylib` / `impacket.dll`), and Rust rlib.
+        * Provided standard C99/C++ header `crates/impacket-cabi/include/impacket.h`.
+    * **Exposed C ABI Functions**:
+        * `impacket_version()`: Library version string.
+        * `impacket_parse_target()`: Structured parsing of complex domain/user:pass@host:port targets.
+        * `impacket_ntlm_hash()` & `impacket_lm_hash()`: Pure-Rust NT and LM password hash generation.
+        * `impacket_ntlmv2_ntowf()`: NTLMv2 HMAC-MD5 password digest derivation.
+        * `impacket_md4()`, `impacket_md5()`, `impacket_sha1()`, `impacket_sha256()`, `impacket_rc4()`, `impacket_des_encrypt_block()`: Cryptographic primitives.
+        * `impacket_decrypt_cpassword()`: Group Policy Preferences password decryption.
+        * `impacket_sid_to_string()`: Binary SID to canonical string translation.
+        * `impacket_krb5_parse_asrep_hashcat()`: Kerberos AS-REP DER parsing to Hashcat `$krb5asrep$` format.
+        * Memory-safe bounds validation and null-pointer defense on all entry points.
 
 ---
 

@@ -103,6 +103,7 @@ fn print_usage() {
     println!("  GetUserPAC <TARGET|TICKET> [-target-user <U>] [opt]  Extract & inspect Kerberos PAC from KDC or ticket file");
     println!("  GetADUsers <TARGET> [-all] [-user <username>]        Active Directory user & mailbox enumerator (LDAP TCP/389)");
     println!("  GetADComputers <TARGET> [-computer <name>]           Active Directory computer accounts enumerator (LDAP TCP/389)");
+    println!("  bloodhound <TARGET> [-o <OUT>] [-zip|-json]          BloodHound CE (v5+) Active Directory collector & ingestor");
     println!("  GetLAPSPassword <TARGET> [-computer <name>]          Query Active Directory LAPS / Windows LAPS passwords (LDAP TCP/389)");
     println!("  CheckLDAPStatus <TARGET> [-port <port>]              Audit LDAP RootDSE, supported capabilities & signing enforcement");
     println!("  addcomputer <TARGET> [-computer-name <N>] [options]  Provision a computer account in Active Directory (LDAP TCP/389)");
@@ -4381,6 +4382,35 @@ fn print_ntlm_report(report: &impacket_smb::DumpNtlmInfoReport) {
     println!("[+] Server Timestamp  : {:?}", ti.timestamp);
 }
 
+fn print_ntlm_report_json(report: &impacket_smb::DumpNtlmInfoReport) {
+    let dialect_str = SmbDialect::from_u16(report.negotiated_dialect)
+        .map(|d| d.name())
+        .unwrap_or("Unknown Dialect");
+    let ti = &report.challenge.target_info;
+    let ts_str = ti
+        .timestamp
+        .and_then(|t| t.to_unix_secs())
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| "null".to_string());
+    println!(
+        "{{\"target\":\"{}\",\"negotiated_dialect\":{},\"dialect_name\":\"{}\",\"signing_enabled\":{},\"signing_required\":{},\"max_read_size\":{},\"max_write_size\":{},\"netbios_computer\":\"{}\",\"netbios_domain\":\"{}\",\"dns_computer\":\"{}\",\"dns_domain\":\"{}\",\"dns_tree\":\"{}\",\"os_version\":\"{}\",\"timestamp_unix\":{}}}",
+        report.target_addr.replace('\\', "\\\\").replace('"', "\\\""),
+        report.negotiated_dialect,
+        dialect_str,
+        report.signing_enabled,
+        report.signing_required,
+        report.max_read_size,
+        report.max_write_size,
+        ti.nb_computer_name.as_deref().unwrap_or("").replace('\\', "\\\\").replace('"', "\\\""),
+        ti.nb_domain_name.as_deref().unwrap_or("").replace('\\', "\\\\").replace('"', "\\\""),
+        ti.dns_computer_name.as_deref().unwrap_or("").replace('\\', "\\\\").replace('"', "\\\""),
+        ti.dns_domain_name.as_deref().unwrap_or("").replace('\\', "\\\\").replace('"', "\\\""),
+        ti.dns_tree_name.as_deref().unwrap_or("").replace('\\', "\\\\").replace('"', "\\\""),
+        report.challenge.guessed_os_version().replace('\\', "\\\\").replace('"', "\\\""),
+        ts_str,
+    );
+}
+
 fn cmd_dfsclient(args: &[String]) {
     print!("{}", version::BANNER);
     if args.is_empty() {
@@ -5412,18 +5442,198 @@ fn cmd_dump_ntlm_info(args: &[String]) {
         }
     };
     let mut port = 445u16;
-    for i in 1..args.len() {
-        if args[i] == "-port" && i + 1 < args.len() {
-            port = args[i + 1].parse().unwrap_or(445);
+    let mut as_json = false;
+    let mut i = 1;
+    while i < args.len() {
+        match args[i].as_str() {
+            "-port" if i + 1 < args.len() => {
+                port = args[i + 1].parse().unwrap_or(445);
+                i += 2;
+            }
+            "-json" | "--json" => {
+                as_json = true;
+                i += 1;
+            }
+            _ => i += 1,
         }
     }
     match dump_ntlm_info_live(spec.effective_target_ip(), port, spec.compat_profile, DEFAULT_TIMEOUT) {
-        Ok(report) => print_ntlm_report(&report),
+        Ok(report) => {
+            if as_json {
+                print_ntlm_report_json(&report);
+            } else {
+                print_ntlm_report(&report);
+            }
+        }
         Err(e) => {
             eprintln!("[-] DumpNTLMInfo error: {}", e);
             std::process::exit(1);
         }
     }
+}
+
+struct BloodHoundCliOptions {
+    output_path: Option<String>,
+    as_json: bool,
+    custom_base: Option<String>,
+    port: u16,
+}
+
+fn parse_bloodhound_cli_options(args: &[String]) -> BloodHoundCliOptions {
+    let mut opts = BloodHoundCliOptions {
+        output_path: None,
+        as_json: false,
+        custom_base: None,
+        port: 389,
+    };
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "-o" | "-output" if i + 1 < args.len() => {
+                opts.output_path = Some(args[i + 1].clone());
+                i += 1;
+            }
+            "-zip" | "--zip" => opts.as_json = false,
+            "-json" | "--json" => opts.as_json = true,
+            "-base" if i + 1 < args.len() => {
+                opts.custom_base = Some(args[i + 1].clone());
+                i += 1;
+            }
+            "-port" if i + 1 < args.len() => {
+                if let Ok(p) = args[i + 1].parse::<u16>() {
+                    opts.port = p;
+                }
+                i += 1;
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    opts
+}
+
+fn export_bloodhound_results(dump: &impacket_ldap::BloodHoundDump, opts: &BloodHoundCliOptions) {
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+
+    if opts.as_json {
+        let dir_str = opts.output_path.clone().unwrap_or_else(|| format!("{}_bloodhound", timestamp));
+        let dir_path = std::path::Path::new(&dir_str);
+        if let Err(e) = dump.write_to_directory(dir_path) {
+            eprintln!("[-] Failed writing BloodHound JSON files: {}", e);
+            std::process::exit(1);
+        }
+        println!("[+] Successfully exported BloodHound v5 JSON files to '{}'.", dir_str);
+    } else {
+        let file_str = opts.output_path.clone().unwrap_or_else(|| format!("{}_BloodHound.zip", timestamp));
+        let file_path = std::path::Path::new(&file_str);
+        if let Err(e) = dump.write_to_zip_file(file_path) {
+            eprintln!("[-] Failed writing BloodHound ZIP bundle: {}", e);
+            std::process::exit(1);
+        }
+        println!("[+] Successfully generated BloodHound CE v5 ZIP bundle at '{}'.", file_str);
+        println!("[*] Upload this ZIP archive directly into BloodHound Community Edition v5 to ingest.");
+    }
+}
+
+fn cmd_bloodhound(args: &[String]) {
+    use impacket_ldap::collect_bloodhound_data;
+    use impacket_ldap::LdapClient;
+
+    print!("{}", version::BANNER);
+    if args.is_empty() || args.iter().any(|a| a == "-h" || a == "--help") {
+        println!("Usage: impacket-rs bloodhound <TARGET> [options]");
+        println!();
+        println!("BloodHound Community Edition (v5+) Active Directory Collector & Ingestor Suite:");
+        println!("  Collects domain users, computers, groups, and domains into BloodHound v5 format");
+        println!();
+        println!("Options:");
+        println!("  -o, -output <PATH>    Output ZIP archive or directory (default: <TIMESTAMP>_BloodHound.zip)");
+        println!("  -zip                  Export as a bundled BloodHound v5 .zip archive (default)");
+        println!("  -json                 Export as individual BloodHound v5 .json files in directory");
+        println!("  -base <BASE_DN>       Active Directory Base DN override");
+        println!("  -port <PORT>          LDAP port (default: 389)");
+        println!("  -hashes LM:NT         NTLM pass-the-hash authentication");
+        println!("  -dc-ip <IP>           Domain Controller IP address override");
+        println!();
+        println!("Examples:");
+        println!("  impacket-rs bloodhound corp.local/admin:Password123@dc01");
+        println!("  impacket-rs bloodhound corp.local/admin:Password123@dc01 -o bloodhound_corp.zip");
+        println!("  impacket-rs bloodhound corp.local/admin@dc01 -hashes :31d6cfe0d16ae931b73c59d7e0c089c0 -json -o ./bh_output/");
+        return;
+    }
+
+    let spec = match parse_target_with_hashes(args) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("[-] Error parsing target: {}", e);
+            std::process::exit(1);
+        }
+    };
+
+    let opts = parse_bloodhound_cli_options(args);
+    let host = spec.effective_target_ip();
+    let addr = format!("{}:{}", host, opts.port);
+    println!("[*] Connecting to Active Directory LDAP on {}...", addr);
+    let mut client = match LdapClient::connect(&addr, DEFAULT_TIMEOUT) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("[-] LDAP connection failed: {}", e);
+            std::process::exit(1);
+        }
+    };
+
+    let bind_dn = if spec.username.is_empty() {
+        String::new()
+    } else if spec.username.contains('@') || spec.username.to_uppercase().contains("DC=") {
+        spec.username.clone()
+    } else if !spec.domain.is_empty() {
+        format!("{}@{}", spec.username, spec.domain)
+    } else {
+        spec.username.clone()
+    };
+
+    let password = spec.password.as_ref().map(|p| p.expose_secret()).unwrap_or("");
+    if !bind_dn.is_empty() {
+        println!("[*] Authenticating as '{}'...", bind_dn);
+        if let Err(e) = client.bind_simple(&bind_dn, password) {
+            eprintln!("[-] LDAP bind failed: {}", e);
+            std::process::exit(1);
+        }
+        println!("[+] Bind successful.");
+    } else {
+        println!("[*] Proceeding with anonymous LDAP bind...");
+        if let Err(e) = client.bind_simple("", "") {
+            eprintln!("[-] Anonymous bind failed: {}", e);
+            std::process::exit(1);
+        }
+    }
+
+    let domain = if !spec.domain.is_empty() {
+        spec.domain.clone()
+    } else {
+        "DOMAIN.LOCAL".to_string()
+    };
+
+    println!("[*] Collecting Active Directory graph data for domain '{}'...", domain.to_uppercase());
+    let dump = match collect_bloodhound_data(&mut client, &domain, opts.custom_base.as_deref()) {
+        Ok(d) => d,
+        Err(e) => {
+            eprintln!("[-] BloodHound collection failed: {}", e);
+            std::process::exit(1);
+        }
+    };
+
+    println!("[+] Extraction complete:");
+    println!("    Users     : {}", dump.users.len());
+    println!("    Computers : {}", dump.computers.len());
+    println!("    Groups    : {}", dump.groups.len());
+    println!("    Domains   : {}", dump.domains.len());
+
+    export_bloodhound_results(&dump, &opts);
+    client.unbind().ok();
 }
 
 fn cmd_get_np_users(args: &[String]) {
@@ -6838,7 +7048,7 @@ fn format_unix_timestamp(secs: u64) -> String {
 
 fn cmd_get_ad_users(args: &[String]) {
     if args.is_empty() {
-        eprintln!("Usage: impacket-rs GetADUsers <TARGET> [-all] [-user <username>] [-port <port>]");
+        eprintln!("Usage: impacket-rs GetADUsers <TARGET> [-all] [-user <username>] [-port <port>] [-json] [-bloodhound]");
         std::process::exit(1);
     }
 
@@ -6853,6 +7063,7 @@ fn cmd_get_ad_users(args: &[String]) {
     let mut port: u16 = 389;
     let mut all_users = false;
     let mut target_user: Option<String> = None;
+    let mut format = "text";
 
     let mut i = 1;
     while i < args.len() {
@@ -6871,6 +7082,22 @@ fn cmd_get_ad_users(args: &[String]) {
                 }
                 i += 2;
             }
+            "-format" if i + 1 < args.len() => {
+                format = match args[i + 1].to_lowercase().as_str() {
+                    "json" => "json",
+                    "bloodhound" | "bh" => "bloodhound",
+                    _ => "text",
+                };
+                i += 2;
+            }
+            "-json" | "--json" => {
+                format = "json";
+                i += 1;
+            }
+            "-bloodhound" | "--bloodhound" | "-bh" => {
+                format = "bloodhound";
+                i += 1;
+            }
             _ => i += 1,
         }
     }
@@ -6878,7 +7105,9 @@ fn cmd_get_ad_users(args: &[String]) {
     let host = spec.effective_target_ip();
     let addr = format!("{}:{}", host, port);
 
-    println!("[*] Connecting to LDAP server at {}...", addr);
+    if format == "text" {
+        println!("[*] Connecting to LDAP server at {}...", addr);
+    }
     let mut client = match LdapClient::connect(&addr, DEFAULT_TIMEOUT) {
         Ok(c) => c,
         Err(e) => {
@@ -6899,14 +7128,20 @@ fn cmd_get_ad_users(args: &[String]) {
 
     let password = spec.password.as_ref().map(|p| p.expose_secret()).unwrap_or("");
     if !bind_dn.is_empty() {
-        println!("[*] Performing simple LDAP bind as '{}'...", bind_dn);
+        if format == "text" {
+            println!("[*] Performing simple LDAP bind as '{}'...", bind_dn);
+        }
         if let Err(e) = client.bind_simple(&bind_dn, password) {
             eprintln!("[-] Bind failed: {}", e);
             std::process::exit(1);
         }
-        println!("[+] Bind successful");
+        if format == "text" {
+            println!("[+] Bind successful");
+        }
     } else {
-        println!("[*] Performing anonymous LDAP bind...");
+        if format == "text" {
+            println!("[*] Performing anonymous LDAP bind...");
+        }
         if let Err(e) = client.bind_simple("", "") {
             eprintln!("[-] Anonymous bind failed: {}", e);
             std::process::exit(1);
@@ -6932,17 +7167,38 @@ fn cmd_get_ad_users(args: &[String]) {
         ])
     };
 
-    let attributes = [
-        "sAMAccountName",
-        "mail",
-        "pwdLastSet",
-        "lastLogon",
-        "userAccountControl",
-        "description",
-    ];
+    let attr_slice = if format == "bloodhound" {
+        vec![
+            "objectSid",
+            "sAMAccountName",
+            "distinguishedName",
+            "userAccountControl",
+            "servicePrincipalName",
+            "msDS-AllowedToDelegateTo",
+            "sIDHistory",
+            "primaryGroupID",
+            "mail",
+            "displayName",
+            "lastLogon",
+            "pwdLastSet",
+            "adminCount",
+            "nTSecurityDescriptor",
+        ]
+    } else {
+        vec![
+            "sAMAccountName",
+            "mail",
+            "pwdLastSet",
+            "lastLogon",
+            "userAccountControl",
+            "description",
+        ]
+    };
 
-    println!("[*] Querying Active Directory users (Base DN: '{}')...", base_dn);
-    let entries = match client.search(&base_dn, SearchScope::WholeSubtree, &filter, &attributes) {
+    if format == "text" {
+        println!("[*] Querying Active Directory users (Base DN: '{}')...", base_dn);
+    }
+    let entries = match client.search(&base_dn, SearchScope::WholeSubtree, &filter, &attr_slice) {
         Ok(e) => e,
         Err(e) => {
             eprintln!("[-] LDAP search failed: {}", e);
@@ -6950,26 +7206,79 @@ fn cmd_get_ad_users(args: &[String]) {
         }
     };
 
-    println!("[+] Found {} user(s):\n", entries.len());
-    println!("{:<20} {:<30} {:<20} {:<20}", "sAMAccountName", "Email", "PwdLastSet", "LastLogon");
-    println!("{:-<20} {:-<30} {:-<20} {:-<20}", "", "", "", "");
-
-    for entry in &entries {
-        let sam = entry.get_string("sAMAccountName").unwrap_or_default();
-        if sam.ends_with('$') && !all_users {
-            continue;
+    match format {
+        "bloodhound" => {
+            let mut bh_users = Vec::new();
+            for entry in &entries {
+                if let Some(user) = impacket_ldap::bloodhound::parse_ldap_user(entry, &spec.domain) {
+                    bh_users.push(user);
+                }
+            }
+            let dump = impacket_ldap::bloodhound::BloodHoundDump {
+                users: bh_users,
+                computers: Vec::new(),
+                groups: Vec::new(),
+                domains: Vec::new(),
+            };
+            println!("{}", dump.to_users_json());
         }
-        let mail = entry.get_string("mail").unwrap_or_else(|| "<none>".to_string());
-        let pwd_last_set = entry
-            .get_string("pwdLastSet")
-            .map(|s| format_filetime_str(&s))
-            .unwrap_or_else(|| "<never>".to_string());
-        let last_logon = entry
-            .get_string("lastLogon")
-            .map(|s| format_filetime_str(&s))
-            .unwrap_or_else(|| "<never>".to_string());
+        "json" => {
+            let mut records = Vec::new();
+            for entry in &entries {
+                let sam = entry.get_string("sAMAccountName").unwrap_or_default();
+                if sam.ends_with('$') && !all_users {
+                    continue;
+                }
+                let mail = entry.get_string("mail").unwrap_or_default();
+                let pwd_last_set = entry
+                    .get_string("pwdLastSet")
+                    .map(|s| format_filetime_str(&s))
+                    .unwrap_or_default();
+                let last_logon = entry
+                    .get_string("lastLogon")
+                    .map(|s| format_filetime_str(&s))
+                    .unwrap_or_default();
+                let uac = entry
+                    .get_string("userAccountControl")
+                    .and_then(|s| s.parse::<u32>().ok())
+                    .unwrap_or(0);
+                let desc = entry.get_string("description").unwrap_or_default();
 
-        println!("{:<20} {:<30} {:<20} {:<20}", sam, mail, pwd_last_set, last_logon);
+                records.push(format!(
+                    "{{\"sAMAccountName\":\"{}\",\"mail\":\"{}\",\"pwdLastSet\":\"{}\",\"lastLogon\":\"{}\",\"userAccountControl\":{},\"description\":\"{}\"}}",
+                    sam.replace('\\', "\\\\").replace('"', "\\\""),
+                    mail.replace('\\', "\\\\").replace('"', "\\\""),
+                    pwd_last_set.replace('\\', "\\\\").replace('"', "\\\""),
+                    last_logon.replace('\\', "\\\\").replace('"', "\\\""),
+                    uac,
+                    desc.replace('\\', "\\\\").replace('"', "\\\""),
+                ));
+            }
+            println!("[{}]", records.join(","));
+        }
+        _ => {
+            println!("[+] Found {} user(s):\n", entries.len());
+            println!("{:<20} {:<30} {:<20} {:<20}", "sAMAccountName", "Email", "PwdLastSet", "LastLogon");
+            println!("{:-<20} {:-<30} {:-<20} {:-<20}", "", "", "", "");
+
+            for entry in &entries {
+                let sam = entry.get_string("sAMAccountName").unwrap_or_default();
+                if sam.ends_with('$') && !all_users {
+                    continue;
+                }
+                let mail = entry.get_string("mail").unwrap_or_else(|| "<none>".to_string());
+                let pwd_last_set = entry
+                    .get_string("pwdLastSet")
+                    .map(|s| format_filetime_str(&s))
+                    .unwrap_or_else(|| "<never>".to_string());
+                let last_logon = entry
+                    .get_string("lastLogon")
+                    .map(|s| format_filetime_str(&s))
+                    .unwrap_or_else(|| "<never>".to_string());
+
+                println!("{:<20} {:<30} {:<20} {:<20}", sam, mail, pwd_last_set, last_logon);
+            }
+        }
     }
 
     client.unbind().ok();
@@ -6977,7 +7286,7 @@ fn cmd_get_ad_users(args: &[String]) {
 
 fn cmd_get_ad_computers(args: &[String]) {
     if args.is_empty() {
-        eprintln!("Usage: impacket-rs GetADComputers <TARGET> [-all] [-computer <name>] [-port <port>]");
+        eprintln!("Usage: impacket-rs GetADComputers <TARGET> [-all] [-computer <name>] [-port <port>] [-json] [-bloodhound]");
         std::process::exit(1);
     }
 
@@ -6992,6 +7301,7 @@ fn cmd_get_ad_computers(args: &[String]) {
     let mut port: u16 = 389;
     let mut _all_computers = false;
     let mut target_computer: Option<String> = None;
+    let mut format = "text";
 
     let mut i = 1;
     while i < args.len() {
@@ -7010,6 +7320,22 @@ fn cmd_get_ad_computers(args: &[String]) {
                 }
                 i += 2;
             }
+            "-format" if i + 1 < args.len() => {
+                format = match args[i + 1].to_lowercase().as_str() {
+                    "json" => "json",
+                    "bloodhound" | "bh" => "bloodhound",
+                    _ => "text",
+                };
+                i += 2;
+            }
+            "-json" | "--json" => {
+                format = "json";
+                i += 1;
+            }
+            "-bloodhound" | "--bloodhound" | "-bh" => {
+                format = "bloodhound";
+                i += 1;
+            }
             _ => i += 1,
         }
     }
@@ -7017,7 +7343,9 @@ fn cmd_get_ad_computers(args: &[String]) {
     let host = spec.effective_target_ip();
     let addr = format!("{}:{}", host, port);
 
-    println!("[*] Connecting to LDAP server at {}...", addr);
+    if format == "text" {
+        println!("[*] Connecting to LDAP server at {}...", addr);
+    }
     let mut client = match LdapClient::connect(&addr, DEFAULT_TIMEOUT) {
         Ok(c) => c,
         Err(e) => {
@@ -7038,14 +7366,20 @@ fn cmd_get_ad_computers(args: &[String]) {
 
     let password = spec.password.as_ref().map(|p| p.expose_secret()).unwrap_or("");
     if !bind_dn.is_empty() {
-        println!("[*] Performing simple LDAP bind as '{}'...", bind_dn);
+        if format == "text" {
+            println!("[*] Performing simple LDAP bind as '{}'...", bind_dn);
+        }
         if let Err(e) = client.bind_simple(&bind_dn, password) {
             eprintln!("[-] Bind failed: {}", e);
             std::process::exit(1);
         }
-        println!("[+] Bind successful");
+        if format == "text" {
+            println!("[+] Bind successful");
+        }
     } else {
-        println!("[*] Performing anonymous LDAP bind...");
+        if format == "text" {
+            println!("[*] Performing anonymous LDAP bind...");
+        }
         if let Err(e) = client.bind_simple("", "") {
             eprintln!("[-] Anonymous bind failed: {}", e);
             std::process::exit(1);
@@ -7066,17 +7400,36 @@ fn cmd_get_ad_computers(args: &[String]) {
         ])
     };
 
-    let attributes = [
-        "sAMAccountName",
-        "dNSHostName",
-        "operatingSystem",
-        "operatingSystemVersion",
-        "pwdLastSet",
-        "lastLogon",
-    ];
+    let attr_slice = if format == "bloodhound" {
+        vec![
+            "objectSid",
+            "sAMAccountName",
+            "distinguishedName",
+            "userAccountControl",
+            "msDS-AllowedToDelegateTo",
+            "msDS-AllowedToActOnBehalfOfOtherIdentity",
+            "sIDHistory",
+            "primaryGroupID",
+            "operatingSystem",
+            "lastLogon",
+            "pwdLastSet",
+            "nTSecurityDescriptor",
+        ]
+    } else {
+        vec![
+            "sAMAccountName",
+            "dNSHostName",
+            "operatingSystem",
+            "operatingSystemVersion",
+            "pwdLastSet",
+            "lastLogon",
+        ]
+    };
 
-    println!("[*] Querying Active Directory computers (Base DN: '{}')...", base_dn);
-    let entries = match client.search(&base_dn, SearchScope::WholeSubtree, &filter, &attributes) {
+    if format == "text" {
+        println!("[*] Querying Active Directory computers (Base DN: '{}')...", base_dn);
+    }
+    let entries = match client.search(&base_dn, SearchScope::WholeSubtree, &filter, &attr_slice) {
         Ok(e) => e,
         Err(e) => {
             eprintln!("[-] LDAP search failed: {}", e);
@@ -7084,17 +7437,64 @@ fn cmd_get_ad_computers(args: &[String]) {
         }
     };
 
-    println!("[+] Found {} computer(s):\n", entries.len());
-    println!("{:<20} {:<30} {:<25} {:<15}", "sAMAccountName", "dNSHostName", "OperatingSystem", "OSVersion");
-    println!("{:-<20} {:-<30} {:-<25} {:-<15}", "", "", "", "");
+    match format {
+        "bloodhound" => {
+            let mut bh_computers = Vec::new();
+            for entry in &entries {
+                if let Some(comp) = impacket_ldap::bloodhound::parse_ldap_computer(entry, &spec.domain) {
+                    bh_computers.push(comp);
+                }
+            }
+            let dump = impacket_ldap::bloodhound::BloodHoundDump {
+                users: Vec::new(),
+                computers: bh_computers,
+                groups: Vec::new(),
+                domains: Vec::new(),
+            };
+            println!("{}", dump.to_computers_json());
+        }
+        "json" => {
+            let mut records = Vec::new();
+            for entry in &entries {
+                let sam = entry.get_string("sAMAccountName").unwrap_or_default();
+                let dns = entry.get_string("dNSHostName").unwrap_or_default();
+                let os = entry.get_string("operatingSystem").unwrap_or_default();
+                let ver = entry.get_string("operatingSystemVersion").unwrap_or_default();
+                let pwd_last_set = entry
+                    .get_string("pwdLastSet")
+                    .map(|s| format_filetime_str(&s))
+                    .unwrap_or_default();
+                let last_logon = entry
+                    .get_string("lastLogon")
+                    .map(|s| format_filetime_str(&s))
+                    .unwrap_or_default();
 
-    for entry in &entries {
-        let sam = entry.get_string("sAMAccountName").unwrap_or_default();
-        let dns = entry.get_string("dNSHostName").unwrap_or_else(|| "<none>".to_string());
-        let os = entry.get_string("operatingSystem").unwrap_or_else(|| "<unknown>".to_string());
-        let ver = entry.get_string("operatingSystemVersion").unwrap_or_default();
+                records.push(format!(
+                    "{{\"sAMAccountName\":\"{}\",\"dNSHostName\":\"{}\",\"operatingSystem\":\"{}\",\"operatingSystemVersion\":\"{}\",\"pwdLastSet\":\"{}\",\"lastLogon\":\"{}\"}}",
+                    sam.replace('\\', "\\\\").replace('"', "\\\""),
+                    dns.replace('\\', "\\\\").replace('"', "\\\""),
+                    os.replace('\\', "\\\\").replace('"', "\\\""),
+                    ver.replace('\\', "\\\\").replace('"', "\\\""),
+                    pwd_last_set.replace('\\', "\\\\").replace('"', "\\\""),
+                    last_logon.replace('\\', "\\\\").replace('"', "\\\""),
+                ));
+            }
+            println!("[{}]", records.join(","));
+        }
+        _ => {
+            println!("[+] Found {} computer(s):\n", entries.len());
+            println!("{:<20} {:<30} {:<25} {:<15}", "sAMAccountName", "dNSHostName", "OperatingSystem", "OSVersion");
+            println!("{:-<20} {:-<30} {:-<25} {:-<15}", "", "", "", "");
 
-        println!("{:<20} {:<30} {:<25} {:<15}", sam, dns, os, ver);
+            for entry in &entries {
+                let sam = entry.get_string("sAMAccountName").unwrap_or_default();
+                let dns = entry.get_string("dNSHostName").unwrap_or_else(|| "<none>".to_string());
+                let os = entry.get_string("operatingSystem").unwrap_or_else(|| "<unknown>".to_string());
+                let ver = entry.get_string("operatingSystemVersion").unwrap_or_default();
+
+                println!("{:<20} {:<30} {:<25} {:<15}", sam, dns, os, ver);
+            }
+        }
     }
 
     client.unbind().ok();
@@ -13292,6 +13692,9 @@ fn main() {
         Some("certipy") | Some("adcs") => cmd_certipy(&args[1..]),
         Some("whisker") | Some("shadowcred") | Some("shadow-credentials") => {
             cmd_whisker(&args[1..])
+        }
+        Some("bloodhound") | Some("bloodhound-ce") | Some("bloodhoundce") => {
+            cmd_bloodhound(&args[1..])
         }
         Some("coerce") => cmd_coerce(&args[1..]),
         Some("getTGT") | Some("get-tgt") => cmd_get_tgt(&args[1..]),

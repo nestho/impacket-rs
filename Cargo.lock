@@ -22,6 +22,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "impacket-cabi"
+version = "0.3.0"
+dependencies = [
+ "impacket-auth",
+ "impacket-core",
+ "impacket-crypto",
+ "impacket-krb5",
+ "impacket-ndr",
+ "impacket-sam",
+]
+
+[[package]]
 name = "impacket-core"
 version = "0.3.0"
 

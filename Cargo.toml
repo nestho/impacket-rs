@@ -15,6 +15,7 @@ members = [
     "crates/impacket-relay",
     "crates/impacket-mssql",
     "crates/impacket-adcs",
+    "crates/impacket-cabi",
     "bins/impacket-rs",
 ]
 

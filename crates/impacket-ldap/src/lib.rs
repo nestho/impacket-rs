@@ -3,6 +3,7 @@
 
 pub mod addcomputer;
 pub mod asn1;
+pub mod bloodhound;
 pub mod client;
 pub mod dacledit;
 pub mod delegation;
@@ -17,6 +18,10 @@ pub use asn1::{
     filter_and, filter_equality, filter_not, filter_or, filter_present, op_tag, result_code,
     AttributeModification, BindAuth, LdapAttribute, LdapControl, LdapMessage, ModifyOperation,
     ProtocolOp, SearchScope, CONTROL_PAGED_RESULTS,
+};
+pub use bloodhound::{
+    collect_bloodhound_data, BloodHoundAce, BloodHoundComputer, BloodHoundDomain, BloodHoundDump,
+    BloodHoundGroup, BloodHoundGroupMember, BloodHoundTrust, BloodHoundUser,
 };
 pub use client::{read_ldap_message, LdapClient, LdapEntry};
 pub use dacledit::{grant_right, read_dacl, revoke_rights, write_dacl, DaclRight};

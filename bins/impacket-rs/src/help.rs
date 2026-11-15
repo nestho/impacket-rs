@@ -45,6 +45,7 @@ positional arguments:
 options:
   -h, --help            show this help message and exit
   -port <PORT>           SMB port (default: 445, or 139)
+  -json                  Output NTLM challenge and OS info as JSON
 
 examples:
   impacket-rs DumpNTLMInfo 192.168.1.20
@@ -87,6 +88,9 @@ options:
   -h, --help            show this help message and exit
   -all                   Query all computer accounts
   -computer <NAME>       Query metadata for a specific computer name only
+  -format <FORMAT>       Output format: text (default), json, or bloodhound
+  -json                  Output records as JSON array
+  -bloodhound, -bh       Output records in BloodHound CE v5 JSON format
 
 authentication:
   -hashes LMHASH:NTHASH
@@ -113,6 +117,9 @@ options:
   -h, --help            show this help message and exit
   -all                   Query all domain users, including disabled and expired accounts
   -user <USER>           Query metadata for a specific user only
+  -format <FORMAT>       Output format: text (default), json, or bloodhound
+  -json                  Output records as JSON array
+  -bloodhound, -bh       Output records in BloodHound CE v5 JSON format
 
 authentication:
   -hashes LMHASH:NTHASH
@@ -555,6 +562,33 @@ examples:
   impacket-rs whisker add corp.local/admin:Pass@dc01 -target-user victim_user -key-out victim.key
   impacket-rs whisker remove corp.local/admin:Pass@dc01 -target-user victim_user -id 12345678-1234-1234-1234-123456789abc
   impacket-rs whisker clear corp.local/admin:Pass@dc01 -target-user victim_user
+"#),
+        "bloodhound" => Some(r#"Description: BloodHound Community Edition (v5+) Active Directory collector & ingestor suite.
+
+usage: impacket-rs bloodhound [options] <target>
+
+positional arguments:
+  target: [[domain/]username[:password]@]<targetName or address>
+
+options:
+  -h, --help            show this help message and exit
+  -c, -collection       Collection scope: all, users, computers, groups, domains (default: all)
+  -o, -output <PATH>    Output path (.zip archive or directory for .json files)
+  -zip                  Export as a bundled BloodHound v5 .zip archive (default)
+  -json                 Export as individual BloodHound v5 .json files
+  -base <BASE_DN>       Active Directory Base DN override
+
+authentication:
+  -hashes LMHASH:NTHASH
+                        NTLM hashes, format is LMHASH:NTHASH
+  -no-pass              don't ask for password
+  -dc-ip ip address     IP Address of the domain controller
+  -port port            Destination LDAP port (default: 389)
+
+examples:
+  impacket-rs bloodhound corp.local/admin:Password123@dc01
+  impacket-rs bloodhound corp.local/admin:Password123@dc01 -o bloodhound_corp.zip
+  impacket-rs bloodhound corp.local/admin@dc01 -hashes :31d6cfe0d16ae931b73c59d7e0c089c0 -json -o ./bh_output/
 "#),
         "coerce" => Some(r#"Description: Active Directory authentication coercion suite covering MS-EFSR (PetitPotam), MS-RPRN (PrinterBug), MS-FSRVP (ShadowCoerce), and MS-DFSNM (DFSCoerce).
 
@@ -2013,6 +2047,9 @@ pub fn canonicalize_name(name: &str) -> &'static str {
         "whisker" => "whisker",
         "shadowcred" => "whisker",
         "shadow-credentials" => "whisker",
+        "bloodhound" => "bloodhound",
+        "bloodhound-ce" => "bloodhound",
+        "bloodhoundce" => "bloodhound",
         "coerce" => "coerce",
         "dfsclient" => "dfsclient",
         "getarch" => "getArch",
@@ -2099,7 +2136,7 @@ mod tests {
             "netview", "reg", "services", "mssqlclient", "GetADUsers",
             "GetADComputers", "GetLAPSPassword", "getGMSAPassword", "CheckLDAPStatus", "addcomputer",
             "dacledit", "owneredit", "dnstool", "ldapsearch", "ldapclient",
-            "certipy", "whisker", "coerce", "dfsclient", "getArch", "machine_role", "oxidquery", "samedit",
+            "certipy", "whisker", "bloodhound", "coerce", "dfsclient", "getArch", "machine_role", "oxidquery", "samedit",
             "changepasswd", "Get-GPPPassword", "net", "wmiquery", "wmipersist",
             "wspsearch", "rdp_check", "registry-read", "tstool", "ping",
             "tracer", "sniffer", "mqtt_check", "klist", "attrib", "filetime",
