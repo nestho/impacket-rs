@@ -164,6 +164,25 @@ This project follows **Semantic Versioning 2.0.0 (SemVer)** and the exact change
         * Implemented automatic fallback parsing of `msDS-GroupMSAMembership` SecurityDescriptor DACL to list authorized principal SIDs upon access denial.
         * Integrated into global help system with parameter validation and automated help coverage tests.
 
+8. `[MS-BKRP]` BackupKey Remote Protocol Client & `backupkey` CLI Tool (`crates/impacket-msrpc`, `crates/impacket-sam` & Phase 3)
+
+    * **`[MS-BKRP]` BackupKey Wire Protocol Client (`crates/impacket-msrpc::bkrp`)**:
+        * Implemented pure-Rust MSRPC client `BkrpClient<T: RpcTransport>` on interface `3dde7c30-165d-11d1-ab8f-00805f14db40` v1.0 over named pipe `\PIPE\protected_storage`.
+        * Implemented `BackuprKey` (Opnum 0) request stub builder and response parser.
+        * Added protocol action GUID constants:
+            * `BACKUPKEY_RETRIEVE_BACKUP_KEY_GUID`: `{018ff48a-eaba-40c6-8f6d-72370240e967}` (retrieves domain 2048-bit RSA public key certificate).
+            * `BACKUPKEY_RESTORE_GUID`: `{47270c64-2fc7-499b-ac5b-0e37cdce899a}` (requests DC to unwrap DPAPI MasterKey).
+            * `BACKUPKEY_BACKUP_GUID`: `{7f752b10-178e-11d1-ab8f-00805f14db40}` (server-side wrap).
+            * `BACKUPKEY_RESTORE_GUID_WIN2K`: `{7fe94d50-178e-11d1-ab8f-00805f14db40}` (legacy Win2k unwrap).
+        * Added `retrieve_backup_key` extracting DER-encoded X.509 certificate.
+        * Added `restore_master_key` sending wrapped master key bytes and unwrapping cleartext 64-byte DPAPI MasterKey.
+    * **`backupkey` & `dpapi` CLI Workflows (`bins/impacket-rs`)**:
+        * Added standalone `backupkey <TARGET> [options]` CLI subcommand with aliases `backupkeys` and `bkrp`.
+        * Added `-export <PREFIX>` exporting retrieved domain backup key certificates to DER (`<PREFIX>.der`) and PEM (`<PREFIX>.crt`).
+        * Added `-restore <FILE>` loading `MasterKeyFile`, extracting `domain_key_bytes`, and unwrapping 64-byte MasterKey via DC.
+        * Enhanced `dpapi` command supporting `dpapi backupkeys <TARGET>` and `dpapi unprotect <MASTERKEY_FILE> <TARGET>`.
+        * Integrated into global help registry with automated help flag verification tests.
+
 ---
 
 ## [v0.2.1] - 2026-11-13
