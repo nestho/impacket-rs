@@ -13,7 +13,7 @@
 //!
 //! Low-level NDR pointer/string helpers shared by the modules live in [`dtypes`].
 
-pub(crate) mod dtypes;
+pub mod dtypes;
 pub mod dfsnm;
 pub mod drsr;
 pub mod efsr;

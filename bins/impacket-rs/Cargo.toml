@@ -25,3 +25,4 @@ impacket-ldap = { path = "../../crates/impacket-ldap" }
 impacket-dcom = { path = "../../crates/impacket-dcom" }
 impacket-relay = { path = "../../crates/impacket-relay" }
 impacket-mssql = { path = "../../crates/impacket-mssql" }
+impacket-adcs = { path = "../../crates/impacket-adcs" }

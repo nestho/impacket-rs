@@ -63,6 +63,31 @@ This project follows **Semantic Versioning 2.0.0 (SemVer)** and the exact change
         * Added `-socks` and `-socks-port <PORT>` flags to launch and coordinate local SOCKS proxy multiplexing.
         * Added `-template <NAME>` flag to select certificate template for ADCS relaying (default: `Machine`).
 
+3. Active Directory Certificate Services (ADCS) Engine (`crates/impacket-adcs` & Phase 3)
+
+    * **`[MS-ICPR]` ICertPassage Remote Protocol (`crates/impacket-adcs::icpr`)**:
+        * Implemented pure-Rust RPC client `IcprClient<T: RpcTransport>` for certificate enrollment over named pipe `\PIPE\cert` (UUID `91ae6020-9e3c-11cf-8d7c-00aa00c091be` v0.0).
+        * Implemented `CertServerRequest` (Opnum 0) with `CERTTRANSBLOB` marshalling (inline length, referent IDs, and deferred conformant array pointees).
+        * Added response parsing for certificate disposition (`CR_DISP_ISSUED`, `CR_DISP_UNDER_SUBMISSION`, `CR_DISP_ERROR`, `CR_DISP_DENIED`), Request ID, disposition messages, and DER certificate extraction.
+    * **Pure-Rust PKCS#10 ASN.1 CSR Generator (`crates/impacket-adcs::csr`)**:
+        * Added `generate_pkcs10_csr` implementing RFC 2986 Certificate Signing Request generation in pure Rust with zero external crypto libraries.
+        * Added custom Subject Alternative Name (SAN) extension injection for User Principal Names (UPN - `szOID_NT_PRINCIPAL_NAME` 1.3.6.1.4.1.311.20.2.3) and DNS names (`dNSName`).
+        * Implemented PKCS#1 v1.5 RSA-SHA256 signature generation via `impacket-crypto::BigUint`.
+        * Added `parse_rsa_private_key` supporting PKCS#1 and PKCS#8 DER private keys.
+    * **ESC1–ESC15 Vulnerability Auditor (`crates/impacket-adcs::auditor`)**:
+        * Implemented template security auditing (`audit_certificate_template`) identifying misconfigurations:
+            * **ESC1**: `ENROLLEE_SUPPLIES_SUBJECT` + Client Authentication EKU + no manager approval.
+            * **ESC2**: Any Purpose EKU or SubCA (Empty EKU).
+            * **ESC3**: Certificate Request Agent (Enrollment Agent) EKU.
+            * **ESC4**: Vulnerable template access control rights (WriteOwner, WriteDacl, GenericWrite).
+            * **ESC9**: `CT_FLAG_NO_SECURITY_EXTENSION` missing security extensions.
+            * **ESC13**: Issuance policies mapped to privileged groups.
+        * Added Enterprise CA auditor (`audit_enterprise_ca`) for **ESC6** (`EDITF_ATTRIBUTESUBJECTALTNAME2`) and **ESC8** (ADCS Web Enrollment HTTP NTLM relay).
+    * **`certipy` / `adcs` CLI Tool (`bins/impacket-rs`)**:
+        * Added `certipy req <TARGET> -ca <CA_NAME> -template <TEMPLATE> [-upn <UPN>] [-dns <DNS>] [-out <FILE>]` for certificate enrollment via `[MS-ICPR]`.
+        * Added `certipy find <TARGET> [-vulnerable] [-base <DN>]` for querying ADCS certificate templates over LDAP and detecting ESC vulnerabilities.
+        * Added help text, alias resolution (`adcs`), and regression test suite.
+
 ---
 
 ## [v0.2.1] - 2026-11-13

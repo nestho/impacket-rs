@@ -184,6 +184,15 @@ pub const WELL_KNOWN_INTERFACES: &[MsrpcInterfaceInfo] = &[
         description: "File Server Remote VSS Protocol (FSRVP)",
     },
     MsrpcInterfaceInfo {
+        short_name: "MS-ICPR (CertPassage)",
+        provider_binary: "certsrv.exe",
+        uuid: RpcUuid::new(0x91ae_6020, 0x9e3c, 0x11cf, [0x8d, 0x7c, 0x00, 0xaa, 0x00, 0xc0, 0x91, 0xbe]),
+        version_major: 0,
+        version_minor: 0,
+        named_pipe: r"\PIPE\cert",
+        description: "ICertPassage Remote Protocol (ADCS Certificate Enrollment)",
+    },
+    MsrpcInterfaceInfo {
         short_name: "MS-EVEN (Event Log)",
         provider_binary: "eventlog.dll",
         uuid: RpcUuid::new(0x8227_3fdc, 0xe32a, 0x18c3, [0x3f, 0x78, 0x82, 0x79, 0x29, 0xdc, 0x23, 0xea]),
