@@ -16,10 +16,13 @@
 pub(crate) mod dtypes;
 pub mod dfsnm;
 pub mod drsr;
+pub mod efsr;
 pub mod even6;
 pub mod exec;
+pub mod fsrvp;
 pub mod lsat;
 pub mod mgmt;
+pub mod rprn;
 pub mod rrp;
 pub mod samr;
 pub mod scmr;
@@ -34,12 +37,21 @@ pub use dfsnm::{
     DFSNM_VERSION_MINOR,
 };
 pub use drsr::{DrsClient, DrsHandle, DrsSyncAccount};
+pub use efsr::{
+    EfsrClient, EFSR_INTERFACE_UUID, EFSR_PIPE, EFSR_VERSION_MAJOR, EFSR_VERSION_MINOR,
+};
 pub use even6::{Even6Client, EvtEventRecord, EVEN6_INTERFACE_UUID, EVEN6_NAMED_PIPE, EVEN6_VERSION_MAJOR, EVEN6_VERSION_MINOR};
 pub use exec::{atexec, dcomexec, psexec, smbexec, wmiexec, DcomObject};
+pub use fsrvp::{
+    FsrvpClient, FSRVP_INTERFACE_UUID, FSRVP_PIPE, FSRVP_VERSION_MAJOR, FSRVP_VERSION_MINOR,
+};
 pub use lsat::{LsatClient, SidNameUse, TranslatedName};
 pub use mgmt::{
     probe_opnums, MgmtClient, OpnumStatus, RpcIfId, MGMT_INTERFACE_UUID, MGMT_VERSION_MAJOR,
     MGMT_VERSION_MINOR,
+};
+pub use rprn::{
+    RprnClient, RPRN_INTERFACE_UUID, RPRN_PIPE, RPRN_VERSION_MAJOR, RPRN_VERSION_MINOR,
 };
 pub use samr::{
     user_access as samr_user_access, DomainEnumEntry, SamrClient, SamprHandle,

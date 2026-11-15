@@ -21,6 +21,30 @@ This project follows **Semantic Versioning 2.0.0 (SemVer)** and the exact change
 
 ---
 
+## [Unreleased]
+
+1. Next-Gen Coercion Suite & MSRPC Wire Clients (Phase 2)
+
+    * **`[MS-EFSR]` Encrypting File System Remote Protocol (`crates/impacket-msrpc::efsr`)**:
+        * Implemented pure-Rust RPC methods for remote file encryption operations: `EfsRpcOpenFileRaw` (Opnum 0), `EfsRpcEncryptFileSrv` (Opnum 4), `EfsRpcDecryptFileSrv` (Opnum 5), and `EfsRpcCloseRaw` (Opnum 3).
+        * Added `EfsrClient<T: RpcTransport>` supporting connection over `\PIPE\efsrpc`, `\PIPE\lsarpc`, `\PIPE\samr`, `\PIPE\lsass`, and `\PIPE\netlogon`.
+        * Implemented context handle and Win32 return code parsers.
+    * **`[MS-RPRN]` Print System Remote Protocol (`crates/impacket-msrpc::rprn`)**:
+        * Implemented pure-Rust RPC methods for remote print spooler management: `RpcOpenPrinter` (Opnum 1), `RpcClosePrinter` (Opnum 29), and `RpcRemoteFindFirstPrinterChangeNotificationEx` (Opnum 65).
+        * Added `RprnClient<T: RpcTransport>` supporting connection over `\PIPE\spoolss`.
+        * Added `DEVMODE_CONTAINER` and `PRINTER_HANDLE` wire encoders and parsers.
+    * **`[MS-FSRVP]` File Server Remote VSS Protocol (`crates/impacket-msrpc::fsrvp`)**:
+        * Implemented pure-Rust RPC methods for remote shadow copy management and path interrogation: `GetSupportedVersion` (Opnum 8), `SetContext` (Opnum 9), and `IsPathSupported` (Opnum 10).
+        * Added `FsrvpClient<T: RpcTransport>` supporting connection over `\PIPE\fssagentrpc`.
+    * **`[MS-DFSNM]` Stand-Alone Root Management (`crates/impacket-msrpc::dfsnm`)**:
+        * Added `NetrDfsRemoveStdRoot` (Opnum 13) and `NetrDfsAddStdRoot` (Opnum 12) wire codecs and client methods to `DfsClient`.
+    * **Unified `coerce` Subcommand (`bins/impacket-rs`)**:
+        * Added `coerce <TARGET> -listener <HOST> [options]` CLI subcommand with multi-protocol dispatch across `[MS-EFSR]` (PetitPotam), `[MS-RPRN]` (PrinterBug), `[MS-FSRVP]` (ShadowCoerce), and `[MS-DFSNM]` (DFSCoerce).
+        * Added `-method <all|efsr|rprn|fsrvp|dfsnm>`, `-share <SHARE>`, and `-pipe <PIPE>` named pipe override options.
+        * Integrated into global help system with alias resolution and regression tests.
+
+---
+
 ## [v0.2.1] - 2026-11-13
 
 1. Low-Artifact & Stealth Credential Extraction
