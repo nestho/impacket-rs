@@ -1,0 +1,13 @@
+[package]
+name = "impacket-adcs"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Active Directory Certificate Services (ADCS) protocol engine ([MS-ICPR], [MS-CSRA], PKCS#10 CSR, and ESC1-ESC15 auditor)"
+
+[dependencies]
+impacket-core = { path = "../impacket-core" }
+impacket-crypto = { path = "../impacket-crypto" }
+impacket-ndr = { path = "../impacket-ndr" }
+impacket-dcerpc = { path = "../impacket-dcerpc" }
+impacket-msrpc = { path = "../impacket-msrpc" }

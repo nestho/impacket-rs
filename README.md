@@ -26,7 +26,7 @@
 **Impacket-RS** is a modern, memory-safe, ground-up rewrite of the industry-standard [SecureAuth Impacket](https://github.com/fortra/impacket) toolkit in pure Rust. Built for security researchers, penetration testers, red teams, and system administrators, it brings **blazing speed, sub-millisecond cold starts, zero interpreter overhead, and complete compile-time memory safety** to low-level Windows network protocol manipulation.
 
 ### Key Highlights
-- **100% Upstream Parity & Beyond**: 75 CLI subcommands covering remote execution (`psexec`, `wmiexec`, `smbexec`, `atexec`), credential dumping (`secretsdump`, `ntdsdump`, `dpapi`), authentication coercion (`coerce` across EFSR/RPRN/FSRVP/DFSNM), Kerberos attacks & armoring (`GetNPUsers`, `GetUserSPNs`, `getTGT`, `getST`, `raiseChild`, `ticketer` Golden/Silver/Diamond), Active Directory administration (`ldapclient`, `GetADUsers`, `trueTree`, `dnstool`, `GetLAPSPassword`), relaying (`ntlmrelayx`), packet dissection (`sniffer`), and network auditing (`rdp_check`, `mqtt_check`, `tracer`).
+- **100% Upstream Parity & Beyond**: 76 CLI subcommands covering remote execution (`psexec`, `wmiexec`, `smbexec`, `atexec`), credential dumping (`secretsdump`, `ntdsdump`, `dpapi`), ADCS certificate enrollment & auditing (`certipy` across `[MS-ICPR]` & ESC1-ESC15), authentication coercion (`coerce` across EFSR/RPRN/FSRVP/DFSNM), Kerberos attacks & armoring (`GetNPUsers`, `GetUserSPNs`, `getTGT`, `getST`, `raiseChild`, `ticketer` Golden/Silver/Diamond), Active Directory administration (`ldapclient`, `GetADUsers`, `trueTree`, `dnstool`, `GetLAPSPassword`), relaying (`ntlmrelayx`), packet dissection (`sniffer`), and network auditing (`rdp_check`, `mqtt_check`, `tracer`).
 - **Cross-Platform Host & Target Ecosystem**: Runs natively on Linux (glibc & static musl), macOS (Apple Silicon & Intel), and Windows. Interacts with both Linux/UNIX targets (Samba, FreeIPA, OpenLDAP, MIT/Heimdal Kerberos KDC) and Windows domains across all eras (Windows 2000 through Windows Server 2025).
 - **Sub-Millisecond Cold Starts**: Starts in **< 2ms** compared to 150-250ms for Python Impacket, making it ideal for massive orchestrations and fast pivoting.
 - **5.85 Million Wire Roundtrips/sec**: Zero-allocation NDR marshaling and compile-time layout verification yield up to **60x to 100x speedups** over pure-Python encoders.
@@ -310,6 +310,7 @@ cargo build --release --target aarch64-pc-windows-msvc
 | `filetime` | Convert between FileTime integers and ISO 8601 or touch remote timestamps |
 | `split` | Split large databases, wordlists, or dump files into chunks |
 | `coerce` | Authentication coercion suite covering MS-EFSR, MS-RPRN, MS-FSRVP, and MS-DFSNM |
+| `certipy` | Active Directory Certificate Services (ADCS) enrollment ([MS-ICPR]) and ESC1-ESC15 auditor |
 | `ntlmrelayx` | Cross-protocol NTLM relay engine (HTTP/SMB/LDAP/MSSQL) with `-tf` routing |
 
 ---
