@@ -13,6 +13,7 @@
 //!
 //! Low-level NDR pointer/string helpers shared by the modules live in [`dtypes`].
 
+pub mod bkrp;
 pub mod dtypes;
 pub mod dfsnm;
 pub mod drsr;
@@ -32,6 +33,11 @@ pub mod transport;
 pub mod tsch;
 pub mod wkst;
 
+pub use bkrp::{
+    BkrpClient, BACKUPKEY_BACKUP_GUID, BACKUPKEY_RESTORE_GUID, BACKUPKEY_RESTORE_GUID_WIN2K,
+    BACKUPKEY_RETRIEVE_BACKUP_KEY_GUID, BKRP_INTERFACE_UUID, BKRP_PIPE, BKRP_VERSION_MAJOR,
+    BKRP_VERSION_MINOR,
+};
 pub use dfsnm::{
     namespace_flavor, storage_state, volume_state, DfsClient, DfsInfo1, DfsInfo2, DfsInfo3,
     DfsInfo300, DfsStorageInfo, DFSNM_INTERFACE_UUID, DFSNM_PIPE, DFSNM_VERSION_MAJOR,

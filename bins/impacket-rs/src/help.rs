@@ -638,6 +638,25 @@ examples:
   impacket-rs dnstool corp.local/jdoe:Pass123!@192.168.1.10 -action query -record dc01
   impacket-rs dnstool corp.local/jdoe:Pass123!@192.168.1.10 -action add -record evil -data 192.168.1.200
 "#),
+        "backupkey" => Some(r#"Description: Interacts with Active Directory BackupKey Remote Protocol (MS-BKRP) to retrieve domain backup certificates and unwrap DPAPI MasterKeys.
+
+usage: impacket-rs backupkey [options] <target>
+
+positional arguments:
+  target: [[domain/]username[:password]@]<targetName or address>
+
+options:
+  -h, --help            show this help message and exit
+  -export prefix        Export domain backup public certificate (<prefix>.crt / <prefix>.der)
+  -restore file         Restore and unwrap DPAPI MasterKey file using Domain Controller
+  -hashes LMHASH:NTHASH NTLM hashes, format is LMHASH:NTHASH
+  -dc-ip ip address     IP Address of the domain controller
+  -target-ip ip address IP Address of the target machine
+
+examples:
+  impacket-rs backupkey corp.local/admin:Pass123!@192.168.1.10 -export domain_backup
+  impacket-rs backupkey corp.local/user:Pass123!@192.168.1.10 -restore /path/to/masterkey_file
+"#),
         "dpapi" => Some(r#"Description: Inspects and decrypts Windows Data Protection API (DPAPI) master keys, credential blobs, and backup keys.
 
 usage: impacket-rs dpapi [options]
@@ -2019,6 +2038,9 @@ pub fn canonicalize_name(name: &str) -> &'static str {
         "ntdsdump" => "ntdsdump",
         "esentutl" => "esentutl",
         "dpapi" => "dpapi",
+        "backupkey" => "backupkey",
+        "backupkeys" => "backupkey",
+        "bkrp" => "backupkey",
         "describeticket" => "describeTicket",
         "getpac" => "getPac",
         "rbcd" => "rbcd",
@@ -2079,7 +2101,7 @@ mod tests {
             "wspsearch", "rdp_check", "registry-read", "tstool", "ping",
             "tracer", "sniffer", "mqtt_check", "klist", "attrib", "filetime",
             "mssqlinstance", "checkMSSQLStatus", "DumpNTLMInfo", "ntdsdump",
-            "esentutl", "dpapi", "describeTicket", "getPac", "rbcd",
+            "esentutl", "dpapi", "backupkey", "describeTicket", "getPac", "rbcd",
             "findDelegation", "trueTree", "raiseChild", "smbpasswd", "split",
             "atq", "eventlog", "compat-matrix", "parse-target", "ntlm-hash",
             "krb5-asreq", "smb-negotiate", "rpc-interfaces", "bench-ndr",
