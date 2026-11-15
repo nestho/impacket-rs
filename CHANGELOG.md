@@ -21,6 +21,12 @@ This project follows **Semantic Versioning 2.0.0 (SemVer)** and the exact change
 
 ---
 
+## [Unreleased]
+
+Active development for Phase 4 (v1.0.0 roadmap: BloodHound CE integration, machine-readable telemetry, C ABI & ecosystem).
+
+---
+
 ## [v0.3.0] - 2026-11-15
 
 1. Next-Gen Coercion Suite & MSRPC Wire Clients (Phase 2)
