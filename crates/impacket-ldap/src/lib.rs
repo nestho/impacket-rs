@@ -7,6 +7,7 @@ pub mod client;
 pub mod dacledit;
 pub mod delegation;
 pub mod dnsp;
+pub mod keycredential;
 pub mod rbcd;
 pub mod security_descriptor;
 pub mod shell;
@@ -30,6 +31,13 @@ pub use dnsp::{
 pub use rbcd::{
     build_rbcd_security_descriptor, flush_rbcd, parse_rbcd_allowed_sids, read_rbcd, write_rbcd,
     RBCD_ATTR_NAME,
+};
+pub use keycredential::{
+    add_shadow_credential, clear_shadow_credentials, read_shadow_credentials,
+    remove_shadow_credential, BcryptRsaPublicKey, DnBinary, KeyCredentialEntry,
+    KeyCredentialLinkBlob, BCRYPT_RSAPUBLIC_MAGIC, IDENTIFIER_DEVICE_ID, IDENTIFIER_KEY_ID,
+    IDENTIFIER_KEY_MATERIAL, IDENTIFIER_KEY_USAGE, KEY_CREDENTIAL_LINK_ATTR, KEY_SOURCE_AD,
+    KEY_USAGE_NGC,
 };
 pub use security_descriptor::{
     access_mask, ace_flags, ace_type, control_flags, Ace, Acl, SecurityDescriptor,

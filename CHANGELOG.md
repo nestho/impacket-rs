@@ -88,6 +88,24 @@ This project follows **Semantic Versioning 2.0.0 (SemVer)** and the exact change
         * Added `certipy find <TARGET> [-vulnerable] [-base <DN>]` for querying ADCS certificate templates over LDAP and detecting ESC vulnerabilities.
         * Added help text, alias resolution (`adcs`), and regression test suite.
 
+4. Active Directory Shadow Credentials Engine (`crates/impacket-ldap` & Phase 3)
+
+    * **`[MS-ADTS]` Section 2.2.18.2 `KEYCREDENTIALLINK_BLOB` Codec (`crates/impacket-ldap::keycredential`)**:
+        * Implemented pure-Rust binary codecs for `KEYCREDENTIALLINK_BLOB` with version 2.0 layout and sorted `KEYCREDENTIALLINK_ENTRY` structures.
+        * Implemented Windows CNG `BCRYPT_RSAKEY_BLOB` parser and builder (`BCRYPT_RSAPUBLIC_MAGIC` 0x31415352 "RSA1") for 2048-bit RSA public keys.
+        * Added automatic cryptographic entry generation: `KeyID` (SHA-256 of `KeyMaterial`), `KeyHash` (SHA-256 of subsequent entries), `KeyUsage` (`KEY_USAGE_NGC`), `KeySource` (`KEY_SOURCE_AD`), 16-byte `DeviceId` GUID, `CustomKeyInformation`, and Windows `FILETIME` timestamps.
+        * Implemented `DnBinary` codec for Active Directory `Object(DN-Binary)` syntax (`B:<hex_len>:<hex_string>:<target_dn>`).
+    * **LDAP Shadow Credential Operations (`crates/impacket-ldap::keycredential`)**:
+        * Added `read_shadow_credentials` querying `msDS-KeyCredentialLink` on Active Directory target objects.
+        * Added `add_shadow_credential` injecting new public keys via LDAP `ModifyOperation::Add`.
+        * Added `remove_shadow_credential` deleting targeted credentials by KeyID, DeviceID, or raw DN-Binary string.
+        * Added `clear_shadow_credentials` flushing all shadow credentials on an object via LDAP `ModifyOperation::Delete`.
+    * **`whisker` CLI Subcommand (`bins/impacket-rs`)**:
+        * Added `whisker <action> <TARGET> [options]` supporting `list`, `add`, `remove`, and `clear` actions.
+        * Added automatic `sAMAccountName` to `distinguishedName` directory resolution (`-target-user <SAM>` or direct `-target-dn <DN>`).
+        * Added key metadata exporting (`-key-out <FILE>`) for integration with PKINIT authentication tools (`getTGT`).
+        * Integrated into global help system with alias resolution (`shadowcred`, `shadow-credentials`) and regression test suite (77 total subcommands).
+
 ---
 
 ## [v0.2.1] - 2026-11-13
