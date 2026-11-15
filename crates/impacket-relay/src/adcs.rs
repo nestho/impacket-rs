@@ -108,7 +108,7 @@ pub fn parse_adcs_response(html: &str) -> Result<AdcsCertificateResult, CoreErro
 fn extract_req_id(html: &str) -> Option<u32> {
     if let Some(pos) = html.find("ReqID=") {
         let slice = &html[pos + 6..];
-        let num_str: String = slice.chars().take_while(|c| c.is_ascii_digit()).collect();
+        let num_str: String = slice.chars().take_while(char::is_ascii_digit).collect();
         num_str.parse().ok()
     } else {
         None

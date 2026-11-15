@@ -139,7 +139,7 @@ impl PacClientInfo {
         let utf16: Vec<u8> = self
             .name
             .encode_utf16()
-            .flat_map(|u| u.to_le_bytes())
+            .flat_map(u16::to_le_bytes)
             .collect();
         let mut out = Vec::with_capacity(10 + utf16.len());
         out.extend_from_slice(&self.client_id.to_le_bytes());
@@ -860,7 +860,7 @@ impl Pac {
 }
 
 fn write_ndr_string(writer: &mut NdrWriter, s: &str) {
-    let utf16: Vec<u8> = s.encode_utf16().flat_map(|u| u.to_le_bytes()).collect();
+    let utf16: Vec<u8> = s.encode_utf16().flat_map(u16::to_le_bytes).collect();
     let char_count = (utf16.len() / 2) as u32;
     writer.write_u32(char_count);
     writer.write_u32(0);

@@ -536,9 +536,8 @@ impl SmbServer {
                 let neg_token = NegTokenInit::new(vec![MechType::Ntlmssp], None);
                 let resp = build_smb2_negotiate_response(0, SmbDialect::Smb210 as u16, *server_guid, &neg_token.to_bytes(), now_ft);
                 return Ok(Some(resp));
-            } else {
-                return Err(CoreError::ProtocolError("SMBv1-only clients not supported; upgrade to SMB2 required".into()));
             }
+            return Err(CoreError::ProtocolError("SMBv1-only clients not supported; upgrade to SMB2 required".into()));
         }
 
         if !pdu.starts_with(&Smb2Header::MAGIC) {
@@ -877,8 +876,8 @@ impl SmbServer {
                 if let Ok(dir_iter) = fs::read_dir(&handle.path) {
                     for (idx, entry_res) in dir_iter.flatten().enumerate() {
                         let meta = entry_res.metadata().ok();
-                        let is_d = meta.as_ref().map(|m| m.is_dir()).unwrap_or(false);
-                        let sz = meta.as_ref().map(|m| m.len()).unwrap_or(0);
+                        let is_d = meta.as_ref().map(fs::Metadata::is_dir).unwrap_or(false);
+                        let sz = meta.as_ref().map(fs::Metadata::len).unwrap_or(0);
                         let name_str = entry_res.file_name().to_string_lossy().to_string();
 
                         entries.push(DirEntryInfo {

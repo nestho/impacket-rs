@@ -231,7 +231,7 @@ impl DnsRpcRecord {
             ttl_seconds: ttl,
             reserved: 0,
             timestamp: 0,
-            data: DnsRecordData::Txt(texts.iter().map(|s| s.to_string()).collect()),
+            data: DnsRecordData::Txt(texts.iter().map(ToString::to_string).collect()),
         }
     }
 

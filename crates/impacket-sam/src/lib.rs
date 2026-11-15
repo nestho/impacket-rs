@@ -428,7 +428,7 @@ pub fn secretsdump_local(sam_hive: &[u8], system_hive: &[u8]) -> Result<Vec<Decr
 pub fn compute_nt_hash(password: &str) -> [u8; 16] {
     let utf16: Vec<u8> = password
         .encode_utf16()
-        .flat_map(|u| u.to_le_bytes())
+        .flat_map(u16::to_le_bytes)
         .collect();
     impacket_crypto::md4(&utf16)
 }

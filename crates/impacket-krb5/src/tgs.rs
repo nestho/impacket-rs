@@ -47,7 +47,7 @@ impl Krb5TgsReq {
         let user_str = username.into();
 
         let spn_components: Vec<String> = if spn.contains('/') {
-            spn.splitn(2, '/').map(|s| s.to_string()).collect()
+            spn.splitn(2, '/').map(ToString::to_string).collect()
         } else {
             vec![spn.to_string()]
         };
@@ -542,7 +542,7 @@ impl Krb5TgsRep {
         session_key_etype: u16,
     ) -> CCache {
         let client = Principal::new(client_realm, &[client_username]);
-        let server_components: Vec<&str> = self.ticket_sname.iter().map(|s| s.as_str()).collect();
+        let server_components: Vec<&str> = self.ticket_sname.iter().map(String::as_str).collect();
         let server = Principal::new(&self.ticket_realm, &server_components);
 
         let cred = Credential {

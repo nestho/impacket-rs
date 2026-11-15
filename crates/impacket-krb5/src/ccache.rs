@@ -18,7 +18,7 @@ impl Principal {
         Self {
             name_type: 1, // NT-PRINCIPAL
             realm: realm.to_string(),
-            components: components.iter().map(|s| s.to_string()).collect(),
+            components: components.iter().map(ToString::to_string).collect(),
         }
     }
 

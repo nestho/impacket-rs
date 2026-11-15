@@ -179,7 +179,7 @@ pub fn forge_ticket(options: &TicketOptions) -> Result<CCache, CoreError> {
     };
 
     // 6. Build Ticket (Application 1)
-    let sname_type = if options.spn.first().map(|s| s.as_str()) == Some("krbtgt") {
+    let sname_type = if options.spn.first().map(String::as_str) == Some("krbtgt") {
         2 // NT-SRV-INST
     } else {
         1 // NT-PRINCIPAL
@@ -209,7 +209,7 @@ pub fn forge_ticket(options: &TicketOptions) -> Result<CCache, CoreError> {
 
     // 7. Assemble CCache container
     let client_principal = Principal::new(&realm, &[&options.username]);
-    let spn_refs: Vec<&str> = options.spn.iter().map(|s| s.as_str()).collect();
+    let spn_refs: Vec<&str> = options.spn.iter().map(String::as_str).collect();
     let server_principal = Principal::new(&realm, &spn_refs);
 
     let cred = Credential {

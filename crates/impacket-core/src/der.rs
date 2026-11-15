@@ -74,7 +74,7 @@ pub fn encode_tlv(tag: u8, value: &[u8]) -> Vec<u8> {
 }
 
 pub fn encode_sequence(elements: &[Vec<u8>]) -> Vec<u8> {
-    let total: usize = elements.iter().map(|e| e.len()).sum();
+    let total: usize = elements.iter().map(Vec::len).sum();
     let mut body = Vec::with_capacity(total);
     for el in elements {
         body.extend_from_slice(el);

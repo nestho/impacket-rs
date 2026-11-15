@@ -2463,7 +2463,7 @@ fn cmd_esentutl(args: &[String]) {
     });
     println!();
 
-    let subcmd = args.get(1).map(|s| s.as_str()).unwrap_or("tables");
+    let subcmd = args.get(1).map(String::as_str).unwrap_or("tables");
     match subcmd {
         "table" => {
             let tname = match args.get(2) {
@@ -3079,7 +3079,7 @@ fn cmd_ticket_converter(args: &[String]) {
     let is_base64 = args.iter().any(|a| a == "-b" || a == "--base64");
     let pos_args: Vec<&str> = args
         .iter()
-        .map(|s| s.as_str())
+        .map(String::as_str)
         .filter(|&a| a != "-b" && a != "--base64")
         .collect();
 
@@ -4230,7 +4230,7 @@ fn cmd_smbclient(args: &[String]) {
                     std::process::exit(1);
                 }
                 let share = positionals[1].trim_start_matches('\\');
-                let path = positionals.get(2).map(|s| s.as_str()).unwrap_or("");
+                let path = positionals.get(2).map(String::as_str).unwrap_or("");
                 if let Err(e) = conn.tree_connect_share(host, share) {
                     eprintln!("[-] failed connecting to share '{}': {}", share, e);
                     std::process::exit(1);
@@ -4250,7 +4250,7 @@ fn cmd_smbclient(args: &[String]) {
                 }
                 let share = positionals[1].trim_start_matches('\\');
                 let remote = &positionals[2];
-                let local = positionals.get(3).map(|s| s.as_str()).unwrap_or_else(|| {
+                let local = positionals.get(3).map(String::as_str).unwrap_or_else(|| {
                     remote.rsplit(&['/', '\\'][..]).next().unwrap_or(remote)
                 });
                 if let Err(e) = conn.tree_connect_share(host, share) {
@@ -4278,7 +4278,7 @@ fn cmd_smbclient(args: &[String]) {
                 }
                 let share = positionals[1].trim_start_matches('\\');
                 let local = &positionals[2];
-                let remote = positionals.get(3).map(|s| s.as_str()).unwrap_or_else(|| {
+                let remote = positionals.get(3).map(String::as_str).unwrap_or_else(|| {
                     local.rsplit(&['/', '\\'][..]).next().unwrap_or(local)
                 });
                 let data = match std::fs::read(local) {
@@ -6666,7 +6666,7 @@ fn cmd_parse_target(args: &[String]) {
 }
 
 fn cmd_ntlm_hash(args: &[String]) {
-    let password = args.first().map(|s| s.as_str()).unwrap_or("");
+    let password = args.first().map(String::as_str).unwrap_or("");
     let include_lm = args.iter().any(|a| a == "--legacy-lm");
     let hashes = compute_ntlm_hashes_with_compat(password, include_lm);
     println!("=== NTLM Cryptographic Output (include_legacy_lm={}) ===", include_lm);
@@ -6688,8 +6688,8 @@ fn cmd_ntlm_hash(args: &[String]) {
 }
 
 fn cmd_krb5_asreq(args: &[String]) {
-    let realm = args.first().map(|s| s.as_str()).unwrap_or("CONTOSO.LOCAL");
-    let user = args.get(1).map(|s| s.as_str()).unwrap_or("Administrator");
+    let realm = args.first().map(String::as_str).unwrap_or("CONTOSO.LOCAL");
+    let user = args.get(1).map(String::as_str).unwrap_or("Administrator");
     let profile = args.get(2).and_then(|s| AdCompatProfile::parse(s).ok()).unwrap_or(AdCompatProfile::UniversalAuto);
     let req = Krb5AsReq::new(realm, user, profile);
     let der = req.to_der_bytes(true);
@@ -7184,7 +7184,7 @@ fn cmd_ldapsearch(args: &[String]) {
     }
 
     let base_dn = custom_base.unwrap_or_else(|| domain_to_base_dn(&spec.domain));
-    let attr_refs: Vec<&str> = attributes.iter().map(|s| s.as_str()).collect();
+    let attr_refs: Vec<&str> = attributes.iter().map(String::as_str).collect();
 
     println!("[*] Searching Base DN '{}' with filter '{}'...", base_dn, filter_str);
     let entries = match client.search(&base_dn, SearchScope::WholeSubtree, filter_str.as_bytes(), &attr_refs) {
@@ -7532,7 +7532,7 @@ fn cmd_ticketer(args: &[String]) {
     };
 
     let spn_parts: Vec<String> = match spn {
-        Some(ref s) => s.split('/').map(|p| p.to_string()).collect(),
+        Some(ref s) => s.split('/').map(ToString::to_string).collect(),
         None => vec!["krbtgt".to_string(), domain.clone()],
     };
 
@@ -13228,7 +13228,7 @@ fn main() {
     let raw_name = all_args.first().map(|p| {
         std::path::Path::new(p)
             .file_name()
-            .and_then(|s| s.to_str())
+            .and_then(std::ffi::OsStr::to_str)
             .unwrap_or("")
     }).unwrap_or("");
     let prog_name = raw_name
@@ -13263,7 +13263,7 @@ fn main() {
         return;
     }
 
-    match args.first().map(|s| s.as_str()) {
+    match args.first().map(String::as_str) {
         Some("DumpNTLMInfo") | Some("dump-ntlm-info") => cmd_dump_ntlm_info(&args[1..]),
         Some("GetNPUsers") | Some("get-np-users") => cmd_get_np_users(&args[1..]),
         Some("GetUserSPNs") | Some("get-user-spns") => cmd_get_user_spns(&args[1..]),

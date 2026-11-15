@@ -22,9 +22,9 @@ jobs:
       - name: Ensure stable Rust toolchain
         run: rustup default stable
       - name: Cargo check
-        run: cargo check --workspace --all-targets
+        run: cargo check --workspace --all-targets --locked
       - name: Cargo test
-        run: cargo test --workspace --verbose
+        run: cargo test --workspace --verbose --locked
 
   analysis:
     name: Static Analysis & Linter (Clippy)
@@ -34,7 +34,7 @@ jobs:
       - name: Ensure stable Rust toolchain with clippy
         run: rustup default stable && rustup component add clippy
       - name: Run Clippy static analysis
-        run: cargo clippy --workspace --all-targets
+        run: cargo clippy --workspace --all-targets --locked
 
   security:
     name: Security Audit (Trivy + Cargo Audit)

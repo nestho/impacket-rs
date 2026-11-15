@@ -279,12 +279,12 @@ impl<'a> Hive<'a> {
                 if inline {
                     let abs = HBIN_BASE + vk_off as usize + 4 + 8;
                     return Ok(Some((abs, data_len.min(4))));
-                } else if data_len == 0 {
-                    return Ok(Some((0, 0)));
-                } else {
-                    let abs = HBIN_BASE + data_offset as usize + 4;
-                    return Ok(Some((abs, data_len)));
                 }
+                if data_len == 0 {
+                    return Ok(Some((0, 0)));
+                }
+                let abs = HBIN_BASE + data_offset as usize + 4;
+                return Ok(Some((abs, data_len)));
             }
         }
         Ok(None)

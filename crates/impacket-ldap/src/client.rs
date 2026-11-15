@@ -32,7 +32,7 @@ impl LdapEntry {
 
     /// Returns the first raw value for an attribute.
     pub fn get_first_raw(&self, name: &str) -> Option<&[u8]> {
-        self.get_raw(name).and_then(|vals| vals.first().map(|v| v.as_slice()))
+        self.get_raw(name).and_then(|vals| vals.first().map(Vec::as_slice))
     }
 
     /// Returns the first value of an attribute decoded as a UTF-8 string.
@@ -365,7 +365,7 @@ impl<S: Read + Write> LdapClient<S> {
                 time_limit: 0,    // no limit
                 types_only: false,
                 filter: filter.to_vec(),
-                attributes: attributes.iter().map(|s| s.to_string()).collect(),
+                attributes: attributes.iter().map(ToString::to_string).collect(),
             },
         );
 
@@ -405,14 +405,13 @@ impl<S: Read + Write> LdapClient<S> {
                 } => {
                     if rc == result_code::SUCCESS {
                         break;
-                    } else {
-                        return Err(CoreError::ProtocolError(format!(
-                            "LDAP search completed with error {} ({}): {}",
-                            rc,
-                            ldap_result_string(rc),
-                            diagnostic_message
-                        )));
                     }
+                    return Err(CoreError::ProtocolError(format!(
+                        "LDAP search completed with error {} ({}): {}",
+                        rc,
+                        ldap_result_string(rc),
+                        diagnostic_message
+                    )));
                 }
                 ProtocolOp::Other { tag, .. } if tag == op_tag::SEARCH_RES_DONE => {
                     break;
@@ -450,7 +449,7 @@ impl<S: Read + Write> LdapClient<S> {
                     time_limit: 0,    // no limit
                     types_only: false,
                     filter: filter.to_vec(),
-                    attributes: attributes.iter().map(|s| s.to_string()).collect(),
+                    attributes: attributes.iter().map(ToString::to_string).collect(),
                 },
                 vec![paged_ctrl],
             );
@@ -497,14 +496,13 @@ impl<S: Read + Write> LdapClient<S> {
                                 }
                             }
                             break;
-                        } else {
-                            return Err(CoreError::ProtocolError(format!(
-                                "LDAP search completed with error {} ({}): {}",
-                                rc,
-                                ldap_result_string(rc),
-                                diagnostic_message
-                            )));
                         }
+                        return Err(CoreError::ProtocolError(format!(
+                            "LDAP search completed with error {} ({}): {}",
+                            rc,
+                            ldap_result_string(rc),
+                            diagnostic_message
+                        )));
                     }
                     ProtocolOp::Other { tag, .. } if tag == op_tag::SEARCH_RES_DONE => {
                         for ctrl in &msg.controls {

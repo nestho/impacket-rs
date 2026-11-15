@@ -440,10 +440,10 @@ impl DpapiBlob {
 
 /// Helper function to derive DPAPI user keys from cleartext password and SID.
 pub fn derive_keys_from_user(sid: &str, password: &str) -> Vec<Vec<u8>> {
-    let pw_utf16: Vec<u8> = password.encode_utf16().flat_map(|u| u.to_le_bytes()).collect();
+    let pw_utf16: Vec<u8> = password.encode_utf16().flat_map(u16::to_le_bytes).collect();
     let sid_term = format!("{}\0", sid);
-    let sid_utf16: Vec<u8> = sid_term.encode_utf16().flat_map(|u| u.to_le_bytes()).collect();
-    let sid_raw_utf16: Vec<u8> = sid.encode_utf16().flat_map(|u| u.to_le_bytes()).collect();
+    let sid_utf16: Vec<u8> = sid_term.encode_utf16().flat_map(u16::to_le_bytes).collect();
+    let sid_raw_utf16: Vec<u8> = sid.encode_utf16().flat_map(u16::to_le_bytes).collect();
 
     // key1: HMAC-SHA1(SHA1(password_utf16), sid_utf16)
     let sha1_pw = sha1(&pw_utf16);
@@ -464,8 +464,8 @@ pub fn derive_keys_from_user(sid: &str, password: &str) -> Vec<Vec<u8>> {
 /// Helper function to derive DPAPI user keys from NTLM hash and SID.
 pub fn derive_keys_from_user_key(sid: &str, nt_hash: &[u8; 16]) -> Vec<Vec<u8>> {
     let sid_term = format!("{}\0", sid);
-    let sid_utf16: Vec<u8> = sid_term.encode_utf16().flat_map(|u| u.to_le_bytes()).collect();
-    let sid_raw_utf16: Vec<u8> = sid.encode_utf16().flat_map(|u| u.to_le_bytes()).collect();
+    let sid_utf16: Vec<u8> = sid_term.encode_utf16().flat_map(u16::to_le_bytes).collect();
+    let sid_raw_utf16: Vec<u8> = sid.encode_utf16().flat_map(u16::to_le_bytes).collect();
 
     let key1 = hmac_sha1(nt_hash, &sid_utf16).to_vec();
 

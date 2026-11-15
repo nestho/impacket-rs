@@ -111,7 +111,7 @@ impl<S: std::io::Read + std::io::Write> LdapShellSession<S> {
                 }
                 let filter = &args[1];
                 let attrs: Vec<&str> = if args.len() > 2 {
-                    args[2..].iter().map(|s| s.as_str()).collect()
+                    args[2..].iter().map(String::as_str).collect()
                 } else {
                     vec!["distinguishedName", "sAMAccountName", "objectClass"]
                 };
@@ -143,7 +143,7 @@ impl<S: std::io::Read + std::io::Write> LdapShellSession<S> {
                         "Usage: add_user <username> <password> [container_dn]".into(),
                     ));
                 }
-                let container = args.get(3).map(|s| s.as_str());
+                let container = args.get(3).map(String::as_str);
                 self.cmd_add_user(&args[1], &args[2], container)
             }
             "add_computer" => {
@@ -152,8 +152,8 @@ impl<S: std::io::Read + std::io::Write> LdapShellSession<S> {
                         "Usage: add_computer <computername> [password] [container_dn]".into(),
                     ));
                 }
-                let pwd = args.get(2).map(|s| s.as_str());
-                let container = args.get(3).map(|s| s.as_str());
+                let pwd = args.get(2).map(String::as_str);
+                let container = args.get(3).map(String::as_str);
                 self.cmd_add_computer(&args[1], pwd, container)
             }
             "add_user_to_group" => {
@@ -382,7 +382,7 @@ impl<S: std::io::Read + std::io::Write> LdapShellSession<S> {
 
     fn cmd_add_user(&mut self, username: &str, password: &str, container_dn: Option<&str>) -> Result<String, CoreError> {
         let container = container_dn
-            .map(|s| s.to_string())
+            .map(ToString::to_string)
             .unwrap_or_else(|| format!("CN=Users,{}", self.base_dn));
         let user_dn = format!("CN={},{}", username, container);
 
@@ -394,7 +394,7 @@ impl<S: std::io::Read + std::io::Write> LdapShellSession<S> {
 
         // Format unicodePwd: UTF-16LE password wrapped in quotation marks
         let quoted_pwd = format!("\"{}\"", password);
-        let pwd_utf16: Vec<u8> = quoted_pwd.encode_utf16().flat_map(|c| c.to_le_bytes()).collect();
+        let pwd_utf16: Vec<u8> = quoted_pwd.encode_utf16().flat_map(u16::to_le_bytes).collect();
 
         let attributes = vec![
             LdapAttribute {
@@ -436,7 +436,7 @@ impl<S: std::io::Read + std::io::Write> LdapShellSession<S> {
         };
         let cn = computer_name.trim_end_matches('$');
         let container = container_dn
-            .map(|s| s.to_string())
+            .map(ToString::to_string)
             .unwrap_or_else(|| format!("CN=Computers,{}", self.base_dn));
         let computer_dn = format!("CN={},{}", cn, container);
 
@@ -474,7 +474,7 @@ impl<S: std::io::Read + std::io::Write> LdapShellSession<S> {
 
         if let Some(pwd) = password {
             let quoted_pwd = format!("\"{}\"", pwd);
-            let pwd_utf16: Vec<u8> = quoted_pwd.encode_utf16().flat_map(|c| c.to_le_bytes()).collect();
+            let pwd_utf16: Vec<u8> = quoted_pwd.encode_utf16().flat_map(u16::to_le_bytes).collect();
             attributes.push(LdapAttribute {
                 type_name: "unicodePwd".to_string(),
                 values: vec![pwd_utf16],
@@ -520,7 +520,7 @@ impl<S: std::io::Read + std::io::Write> LdapShellSession<S> {
     fn cmd_change_password(&mut self, username: &str, new_password: &str) -> Result<String, CoreError> {
         let user_dn = self.resolve_account_dn(username)?;
         let quoted_pwd = format!("\"{}\"", new_password);
-        let pwd_utf16: Vec<u8> = quoted_pwd.encode_utf16().flat_map(|c| c.to_le_bytes()).collect();
+        let pwd_utf16: Vec<u8> = quoted_pwd.encode_utf16().flat_map(u16::to_le_bytes).collect();
 
         let mod_op = AttributeModification {
             operation: ModifyOperation::Replace,

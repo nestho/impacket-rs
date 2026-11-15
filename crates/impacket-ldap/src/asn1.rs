@@ -310,19 +310,20 @@ impl LdapMessage {
                 filter,
                 attributes,
             } => {
-                let mut search_seq = Vec::new();
-                search_seq.push(der::encode_octet_string(base_object.as_bytes()));
-                search_seq.push(der::encode_tlv(0x0A, &[*scope as u8])); // ENUMERATED
-                search_seq.push(der::encode_tlv(0x0A, &[*deref_aliases as u8])); // ENUMERATED
-                search_seq.push(der::encode_integer(*size_limit as i64));
-                search_seq.push(der::encode_integer(*time_limit as i64));
-                search_seq.push(der::encode_tlv(0x01, &[if *types_only { 0xFF } else { 0x00 }]));
-                search_seq.push(filter.clone());
+                let mut search_seq = vec![
+                    der::encode_octet_string(base_object.as_bytes()),
+                    der::encode_tlv(0x0A, &[*scope as u8]), // ENUMERATED
+                    der::encode_tlv(0x0A, &[*deref_aliases as u8]), // ENUMERATED
+                    der::encode_integer(*size_limit as i64),
+                    der::encode_integer(*time_limit as i64),
+                    der::encode_tlv(0x01, &[if *types_only { 0xFF } else { 0x00 }]),
+                    filter.clone(),
+                ];
 
-                let mut attr_elements = Vec::new();
-                for a in attributes {
-                    attr_elements.push(der::encode_octet_string(a.as_bytes()));
-                }
+                let attr_elements: Vec<Vec<u8>> = attributes
+                    .iter()
+                    .map(|a| der::encode_octet_string(a.as_bytes()))
+                    .collect();
                 search_seq.push(der::encode_sequence(&attr_elements));
 
                 let body = der::encode_sequence(&search_seq);
