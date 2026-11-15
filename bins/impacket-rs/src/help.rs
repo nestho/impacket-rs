@@ -492,6 +492,44 @@ examples:
   impacket-rs certipy req corp.local/user:Pass@192.168.1.10 -ca 'corp-DC01-CA' -template ESC1Template -upn administrator@corp.local -out cert.der
   impacket-rs certipy find corp.local/user:Pass@192.168.1.10 -vulnerable
 "#),
+        "whisker" => Some(r#"Description: Active Directory Shadow Credentials management tool ([MS-ADTS] Section 2.2.18.2 msDS-KeyCredentialLink).
+
+usage: impacket-rs whisker <action> [options] <target>
+
+actions:
+  list                  List all shadow credentials on the target account
+  add                   Generate RSA key and inject a shadow credential (msDS-KeyCredentialLink)
+  remove                Remove a shadow credential matching KeyID, DeviceID, or raw string
+  clear                 Clear all shadow credentials on the target account
+
+positional arguments:
+  target: [[domain/]username[:password]@]<targetName or address>
+
+options:
+  -h, --help            show this help message and exit
+  -target-user <SAM>    Target sAMAccountName (e.g. jdoe or dc01$)
+  -target-dn <DN>       Target Distinguished Name
+  -id <ID>              KeyID or DeviceID for remove action
+  -key-out <FILE>       Path to save generated RSA private key (for add action)
+  -base <BASE_DN>       Active Directory Base DN override
+
+authentication:
+  -hashes LMHASH:NTHASH
+                        NTLM hashes, format is LMHASH:NTHASH
+  -no-pass              don't ask for password (useful for -k)
+  -k                    Use Kerberos authentication. Grabs credentials from
+                        ccache file (KRB5CCNAME)
+  -aesKey hex key       AES key to use for Kerberos Authentication (128 or 256 bits)
+  -dc-ip ip address     IP Address of the domain controller
+  -target-ip ip address IP Address of the target machine
+  -port port            Destination port to connect to
+
+examples:
+  impacket-rs whisker list corp.local/admin:Pass@dc01 -target-user victim_user
+  impacket-rs whisker add corp.local/admin:Pass@dc01 -target-user victim_user -key-out victim.key
+  impacket-rs whisker remove corp.local/admin:Pass@dc01 -target-user victim_user -id 12345678-1234-1234-1234-123456789abc
+  impacket-rs whisker clear corp.local/admin:Pass@dc01 -target-user victim_user
+"#),
         "coerce" => Some(r#"Description: Active Directory authentication coercion suite covering MS-EFSR (PetitPotam), MS-RPRN (PrinterBug), MS-FSRVP (ShadowCoerce), and MS-DFSNM (DFSCoerce).
 
 usage: impacket-rs coerce [options] -listener <LISTENER> <target>
@@ -1919,6 +1957,9 @@ pub fn canonicalize_name(name: &str) -> &'static str {
         "ldapclient" => "ldapclient",
         "certipy" => "certipy",
         "adcs" => "certipy",
+        "whisker" => "whisker",
+        "shadowcred" => "whisker",
+        "shadow-credentials" => "whisker",
         "coerce" => "coerce",
         "dfsclient" => "dfsclient",
         "getarch" => "getArch",
@@ -2002,7 +2043,7 @@ mod tests {
             "netview", "reg", "services", "mssqlclient", "GetADUsers",
             "GetADComputers", "GetLAPSPassword", "CheckLDAPStatus", "addcomputer",
             "dacledit", "owneredit", "dnstool", "ldapsearch", "ldapclient",
-            "certipy", "coerce", "dfsclient", "getArch", "machine_role", "oxidquery", "samedit",
+            "certipy", "whisker", "coerce", "dfsclient", "getArch", "machine_role", "oxidquery", "samedit",
             "changepasswd", "Get-GPPPassword", "net", "wmiquery", "wmipersist",
             "wspsearch", "rdp_check", "registry-read", "tstool", "ping",
             "tracer", "sniffer", "mqtt_check", "klist", "attrib", "filetime",
