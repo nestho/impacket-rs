@@ -23,4 +23,3 @@ edition = "2021"
 authors = ["Nestho <nestho@icloud.com>"]
 license = "Apache-2.0"
 repository = "https://github.com/nestho/impacket-rs"
-description = "High-performance, memory-safe pure-Rust redesign of Impacket protocols and Active Directory tools for Linux, macOS, and Windows"

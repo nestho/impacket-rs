@@ -43,6 +43,26 @@ This project follows **Semantic Versioning 2.0.0 (SemVer)** and the exact change
         * Added `-method <all|efsr|rprn|fsrvp|dfsnm>`, `-share <SHARE>`, and `-pipe <PIPE>` named pipe override options.
         * Integrated into global help system with alias resolution and regression tests.
 
+2. Expanded NTLM Relay Targets & SOCKS Multiplexer (Phase 2)
+
+    * **DCE/RPC NTLM Relay Adapter (`crates/impacket-relay::rpc`)**:
+        * Added `extract_ntlm_from_rpc_pdu` parsing `SecTrailer` authentication payloads from DCE/RPC `Bind` (PDU 11), `BindAck` (PDU 12), and `Auth3` (PDU 16).
+        * Added `wrap_ntlm_in_rpc_bind_ack` and `wrap_ntlm_in_rpc_auth3` builders with NDR 4-byte padding alignment.
+        * Supports relaying NTLM authentication to RPC/EPM endpoints (`rpc://<HOST>`).
+    * **ADCS Web Enrollment HTTP Relay Client (`crates/impacket-relay::adcs`)**:
+        * Added `build_adcs_enrollment_request` constructing authenticated HTTP POST requests to `/certsrv/certfnsh.asp` with URL-encoded PKCS#10 CSRs and template selection.
+        * Added `parse_adcs_response` extracting direct PEM certificates, Request IDs (`ReqID=`), and disposition statuses.
+        * Added `build_adcs_cert_download_request` for `/certsrv/certnew.cer` certificate retrieval.
+        * Supports relaying NTLM authentication to ADCS HTTP endpoints (`adcs://<HOST>/certsrv/certfnsh.asp`).
+    * **Interactive SOCKS Multiplexer & Relay Session Pool (`crates/impacket-relay::socks`)**:
+        * Added `SocksRelayPool` managing authenticated relayed connection lifetimes across protocols (SMB, LDAP, MSSQL, HTTP, RPC, WinRM, ADCS).
+        * Implemented `register_session`, `get_session`, `remove_session`, `list_sessions`, and tabular display formatting (`format_table`).
+        * Added `dispatch` destination routing for SOCKS4/SOCKS5 proxy requests based on target port matching.
+    * **`ntlmrelayx` CLI Upgrades (`bins/impacket-rs`)**:
+        * Added support for `rpc://`, `winrm://`, and `adcs://` target URL schemes.
+        * Added `-socks` and `-socks-port <PORT>` flags to launch and coordinate local SOCKS proxy multiplexing.
+        * Added `-template <NAME>` flag to select certificate template for ADCS relaying (default: `Machine`).
+
 ---
 
 ## [v0.2.1] - 2026-11-13
