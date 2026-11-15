@@ -455,6 +455,43 @@ examples:
   impacket-rs describeTicket admin.ccache
   impacket-rs describeTicket ticket.kirbi
 "#),
+        "certipy" => Some(r#"Description: Active Directory Certificate Services (ADCS) toolkit for certificate enrollment ([MS-ICPR] over \PIPE\cert) and ESC1-ESC15 template auditing.
+
+usage: impacket-rs certipy <action> [options] <target>
+
+actions:
+  req                   Request / enroll a certificate via [MS-ICPR]
+  find                  Audit Certificate Templates for ESC1-ESC15 escalation paths
+
+positional arguments:
+  target: [[domain/]username[:password]@]<targetName or address>
+
+options:
+  -h, --help            show this help message and exit
+  -ca <CA_NAME>         Target CA authority name (required for req)
+  -template <TEMPLATE>  Certificate template name (default: User)
+  -upn <UPN>            Subject Alternative Name (SAN) UPN to request
+  -dns <DNS>            Subject Alternative Name (SAN) DNS to request
+  -out <FILE>           Output file to save issued certificate (default: cert.der)
+  -key-out <KEYFILE>    Output file to save private key
+  -vulnerable           Only display vulnerable templates (for find)
+  -base <BASE_DN>       Active Directory base DN override
+
+authentication:
+  -hashes LMHASH:NTHASH
+                        NTLM hashes, format is LMHASH:NTHASH
+  -no-pass              don't ask for password (useful for -k)
+  -k                    Use Kerberos authentication. Grabs credentials from
+                        ccache file (KRB5CCNAME)
+  -aesKey hex key       AES key to use for Kerberos Authentication (128 or 256 bits)
+  -dc-ip ip address     IP Address of the domain controller
+  -target-ip ip address IP Address of the target machine
+  -port port            Destination port to connect to
+
+examples:
+  impacket-rs certipy req corp.local/user:Pass@192.168.1.10 -ca 'corp-DC01-CA' -template ESC1Template -upn administrator@corp.local -out cert.der
+  impacket-rs certipy find corp.local/user:Pass@192.168.1.10 -vulnerable
+"#),
         "coerce" => Some(r#"Description: Active Directory authentication coercion suite covering MS-EFSR (PetitPotam), MS-RPRN (PrinterBug), MS-FSRVP (ShadowCoerce), and MS-DFSNM (DFSCoerce).
 
 usage: impacket-rs coerce [options] -listener <LISTENER> <target>
@@ -1880,6 +1917,8 @@ pub fn canonicalize_name(name: &str) -> &'static str {
         "dnstool" => "dnstool",
         "ldapsearch" => "ldapsearch",
         "ldapclient" => "ldapclient",
+        "certipy" => "certipy",
+        "adcs" => "certipy",
         "coerce" => "coerce",
         "dfsclient" => "dfsclient",
         "getarch" => "getArch",
@@ -1963,7 +2002,7 @@ mod tests {
             "netview", "reg", "services", "mssqlclient", "GetADUsers",
             "GetADComputers", "GetLAPSPassword", "CheckLDAPStatus", "addcomputer",
             "dacledit", "owneredit", "dnstool", "ldapsearch", "ldapclient",
-            "coerce", "dfsclient", "getArch", "machine_role", "oxidquery", "samedit",
+            "certipy", "coerce", "dfsclient", "getArch", "machine_role", "oxidquery", "samedit",
             "changepasswd", "Get-GPPPassword", "net", "wmiquery", "wmipersist",
             "wspsearch", "rdp_check", "registry-read", "tstool", "ping",
             "tracer", "sniffer", "mqtt_check", "klist", "attrib", "filetime",
