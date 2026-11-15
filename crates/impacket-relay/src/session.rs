@@ -14,6 +14,9 @@ pub enum RelayProtocol {
     Smb,
     Ldap,
     Mssql,
+    Rpc,
+    Winrm,
+    Adcs,
 }
 
 impl RelayProtocol {
@@ -23,6 +26,9 @@ impl RelayProtocol {
             Self::Smb => "SMB",
             Self::Ldap => "LDAP",
             Self::Mssql => "MSSQL",
+            Self::Rpc => "RPC",
+            Self::Winrm => "WINRM",
+            Self::Adcs => "ADCS",
         }
     }
 }

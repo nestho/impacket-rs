@@ -93,8 +93,9 @@ dependencies = [
  "impacket-auth",
  "impacket-core",
  "impacket-crypto",
+ "impacket-dcerpc",
  "impacket-ldap",
- "impacket-smb",
+ "impacket-ndr",
 ]
 
 [[package]]

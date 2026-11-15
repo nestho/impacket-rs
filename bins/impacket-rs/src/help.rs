@@ -1046,21 +1046,24 @@ options:
 examples:
   impacket-rs ntlm-hash Password123!
 "#),
-        "ntlmrelayx" => Some(r#"Description: NTLM cross-protocol relay orchestrator supporting HTTP, SMB, and LDAP relay sessions with MIC and EPA channel binding stripping.
+        "ntlmrelayx" => Some(r#"Description: NTLM cross-protocol relay orchestrator supporting HTTP, SMB, LDAP, MSSQL, RPC/EPM, ADCS CES, and WinRM relay sessions with SOCKS multiplexer and MIC/EPA channel binding stripping.
 
 usage: impacket-rs ntlmrelayx [options]
 
 options:
   -h, --help            show this help message and exit
-  -t <TARGET>            Target URL to relay credentials to (e.g. smb://192.168.1.50 or ldap://dc01)
+  -t <TARGET>            Target URL to relay credentials to (e.g. smb://192.168.1.50, ldap://dc01, adcs://ca01/certsrv, rpc://dc01)
   -tf <FILE>             File containing targets to relay to (one per line)
-  -smb2support           Support SMB2 in relaying
-  -socks                 Enable SOCKS proxy server for relayed sessions
-  -lootdir <DIR>         Directory to store looted secrets and SAM hashes
+  -proto <PROTO>         Incoming listener protocol (http or smb, default: http)
+  -socks                 Enable SOCKS proxy multiplexer server for relayed sessions
+  -socks-port <PORT>     Port for local SOCKS proxy multiplexer (default: 1080)
+  -template <TEMPLATE>   ADCS certificate template to request when relaying to ADCS (default: Machine)
+  -lootdir <DIR>         Directory to store looted secrets, SAM hashes, or issued certificates
   -wh <WPAD_HOST>        Enable rogue WPAD server and proxy requests
 
 examples:
-  impacket-rs ntlmrelayx -t smb://192.168.1.50 -smb2support
+  impacket-rs ntlmrelayx -t smb://192.168.1.50
+  impacket-rs ntlmrelayx -t adcs://ca01.corp.local/certsrv/certfnsh.asp -template Machine
   impacket-rs ntlmrelayx -t ldap://192.168.1.10 -lootdir /tmp/loot
   impacket-rs ntlmrelayx -tf targets.txt -socks
 "#),

@@ -9,6 +9,7 @@ pub struct RelayTarget {
     pub protocol: RelayProtocol,
     pub host: String,
     pub port: u16,
+    pub path: String,
 }
 
 impl RelayTarget {
@@ -17,10 +18,11 @@ impl RelayTarget {
             protocol,
             host: host.into(),
             port,
+            path: "/".to_string(),
         }
     }
 
-    /// Parses a target URL string like `smb://192.168.1.10`, `ldap://dc01.corp.local`, `http://srv01`.
+    /// Parses a target URL string like `smb://192.168.1.10`, `ldap://dc01.corp.local`, `http://srv01`, `adcs://ca01/certsrv`.
     pub fn parse(url: &str) -> Result<Self, CoreError> {
         let trimmed = url.trim();
         let (proto, rest) = if let Some((p, r)) = trimmed.split_once("://") {
@@ -34,6 +36,9 @@ impl RelayTarget {
             "smb" => RelayProtocol::Smb,
             "ldap" => RelayProtocol::Ldap,
             "mssql" => RelayProtocol::Mssql,
+            "rpc" => RelayProtocol::Rpc,
+            "winrm" => RelayProtocol::Winrm,
+            "adcs" => RelayProtocol::Adcs,
             other => {
                 return Err(CoreError::ProtocolError(format!(
                     "Unsupported relay protocol: {}",
@@ -42,11 +47,15 @@ impl RelayTarget {
             }
         };
 
-        let (host, port) = if let Some((h, p_str)) = rest.split_once(':') {
+        // Separate host:port and path
+        let (host_port, path) = if let Some((hp, p)) = rest.split_once('/') {
+            (hp, format!("/{}", p))
+        } else {
+            (rest, "/".to_string())
+        };
+
+        let (host, port) = if let Some((h, p_str)) = host_port.split_once(':') {
             let port_num: u16 = p_str
-                .split('/')
-                .next()
-                .unwrap_or(p_str)
                 .parse()
                 .map_err(|_| CoreError::ProtocolError("Invalid port number".into()))?;
             (h.to_string(), port_num)
@@ -56,15 +65,18 @@ impl RelayTarget {
                 RelayProtocol::Smb => 445,
                 RelayProtocol::Ldap => 389,
                 RelayProtocol::Mssql => 1433,
+                RelayProtocol::Rpc => 135,
+                RelayProtocol::Winrm => 5985,
+                RelayProtocol::Adcs => 80,
             };
-            let h = rest.split('/').next().unwrap_or(rest);
-            (h.to_string(), default_port)
+            (host_port.to_string(), default_port)
         };
 
         Ok(Self {
             protocol,
             host,
             port,
+            path,
         })
     }
 }
@@ -122,6 +134,20 @@ mod tests {
         assert_eq!(t3.protocol, RelayProtocol::Http);
         assert_eq!(t3.host, "web.corp.local");
         assert_eq!(t3.port, 8080);
+        assert_eq!(t3.path, "/endpoint");
+
+        let t4 = RelayTarget::parse("rpc://192.168.1.10").unwrap();
+        assert_eq!(t4.protocol, RelayProtocol::Rpc);
+        assert_eq!(t4.port, 135);
+
+        let t5 = RelayTarget::parse("winrm://srv01.corp.local").unwrap();
+        assert_eq!(t5.protocol, RelayProtocol::Winrm);
+        assert_eq!(t5.port, 5985);
+
+        let t6 = RelayTarget::parse("adcs://ca01.corp.local/certsrv/certfnsh.asp").unwrap();
+        assert_eq!(t6.protocol, RelayProtocol::Adcs);
+        assert_eq!(t6.port, 80);
+        assert_eq!(t6.path, "/certsrv/certfnsh.asp");
     }
 
     #[test]
