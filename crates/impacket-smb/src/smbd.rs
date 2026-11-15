@@ -413,7 +413,7 @@ impl<S: Read + Write> SmbdTransport<S> {
             let data_offset = u32::from_le_bytes([header_buf[12], header_buf[13], header_buf[14], header_buf[15]]) as usize;
             let data_length = u32::from_le_bytes([header_buf[16], header_buf[17], header_buf[18], header_buf[19]]) as usize;
 
-            let padding_len = if data_offset > 20 { data_offset - 20 } else { 0 };
+            let padding_len = data_offset.saturating_sub(20);
             if padding_len > 0 {
                 let mut pad_buf = vec![0u8; padding_len];
                 self.stream

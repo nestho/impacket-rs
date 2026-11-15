@@ -943,7 +943,7 @@ pub enum RpcAuthLevel {
 pub enum RpcSecurityContext {
     None,
     Ntlm {
-        security: impacket_auth::NtlmSessionSecurity,
+        security: Box<impacket_auth::NtlmSessionSecurity>,
         level: RpcAuthLevel,
     },
 }
@@ -951,7 +951,7 @@ pub enum RpcSecurityContext {
 impl RpcSecurityContext {
     pub fn new_ntlm(session_key: &[u8; 16], level: RpcAuthLevel) -> Self {
         Self::Ntlm {
-            security: impacket_auth::NtlmSessionSecurity::new(session_key),
+            security: Box::new(impacket_auth::NtlmSessionSecurity::new(session_key)),
             level,
         }
     }

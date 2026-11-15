@@ -800,8 +800,8 @@ pub fn encode_sampr_encrypted_user_password(
     };
 
     // Fill preceding bytes with deterministic filler
-    for i in 0..offset {
-        buf[i] = ((i.wrapping_mul(37).wrapping_add(0x5a)) & 0xff) as u8;
+    for (i, b) in buf.iter_mut().enumerate().take(offset) {
+        *b = ((i.wrapping_mul(37).wrapping_add(0x5a)) & 0xff) as u8;
     }
 
     // Copy UTF-16LE password bytes
@@ -831,13 +831,13 @@ pub fn decode_sampr_encrypted_user_password(
     rc4.apply_keystream(&mut buf);
 
     let pwd_len_bytes = u32::from_le_bytes([buf[512], buf[513], buf[514], buf[515]]) as usize;
-    if pwd_len_bytes > 512 || pwd_len_bytes % 2 != 0 {
+    if pwd_len_bytes > 512 || !pwd_len_bytes.is_multiple_of(2) {
         return Err(CoreError::ProtocolError("Invalid SAMPR password length".into()));
     }
     let offset = 512 - pwd_len_bytes;
     let mut u16_chars = Vec::with_capacity(pwd_len_bytes / 2);
-    for chunk in buf[offset..512].chunks_exact(2) {
-        u16_chars.push(u16::from_le_bytes([chunk[0], chunk[1]]));
+    for &chunk in buf[offset..512].as_chunks::<2>().0 {
+        u16_chars.push(u16::from_le_bytes(chunk));
     }
     String::from_utf16(&u16_chars).map_err(|e| CoreError::ProtocolError(e.to_string()))
 }

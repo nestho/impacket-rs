@@ -162,7 +162,7 @@ fn read_null_terminated_utf16(data: &[u8], offset: usize) -> Result<String, Core
     }
     let slice = &data[offset..];
     let mut u16s = Vec::new();
-    for chunk in slice.chunks_exact(2) {
+    for chunk in slice.as_chunks::<2>().0 {
         let code = u16::from_le_bytes([chunk[0], chunk[1]]);
         if code == 0 {
             break;

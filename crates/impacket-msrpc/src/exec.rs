@@ -183,6 +183,7 @@ pub fn atexec(
 /// Runs `command` on `host` via PSEXEC Service Control Manager (`\PIPE\svcctl`) execution,
 /// writing output to `share` (defaults to "ADMIN$" or "C$"), reading it back, and cleaning up.
 /// If `service_binary` is supplied, uploads the binary first and runs it as a service.
+#[allow(clippy::too_many_arguments)]
 pub fn psexec(
     host: &str,
     domain: &str,
@@ -308,6 +309,7 @@ impl DcomObject {
 
 /// Runs `command` on `host` via WMI `Win32_Process::Create` (`examples/wmiexec.py`),
 /// capturing stdout+stderr via SMB loopback share redirection.
+#[allow(clippy::too_many_arguments)]
 pub fn wmiexec(
     host: &str,
     domain: &str,
@@ -356,6 +358,7 @@ pub fn wmiexec(
 
 /// Runs `command` on `host` via DCOM automation objects (`examples/dcomexec.py`),
 /// capturing stdout+stderr via SMB loopback share redirection.
+#[allow(clippy::too_many_arguments)]
 pub fn dcomexec(
     host: &str,
     domain: &str,

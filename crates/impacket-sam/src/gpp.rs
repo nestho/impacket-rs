@@ -62,10 +62,11 @@ pub fn decrypt_cpassword(cpass: &str) -> Result<String, CoreError> {
     let mut unpadded = &decrypted[..];
     if let Some(&last) = unpadded.last() {
         let pad_len = last as usize;
-        if pad_len >= 1 && pad_len <= 16 && unpadded.len() >= pad_len {
-            if unpadded[unpadded.len() - pad_len..].iter().all(|&b| b == last) {
-                unpadded = &unpadded[..unpadded.len() - pad_len];
-            }
+        if (1..=16).contains(&pad_len)
+            && unpadded.len() >= pad_len
+            && unpadded[unpadded.len() - pad_len..].iter().all(|&b| b == last)
+        {
+            unpadded = &unpadded[..unpadded.len() - pad_len];
         }
     }
 
@@ -135,8 +136,8 @@ fn extract_attribute_value(tag: &str, attr_name: &str) -> Option<String> {
         let abs_idx = pos + idx;
         let after_attr = &tag[abs_idx + attr_name.len()..];
         let trimmed_after = after_attr.trim_start();
-        if trimmed_after.starts_with('=') {
-            let after_eq = trimmed_after[1..].trim_start();
+        if let Some(after_eq) = trimmed_after.strip_prefix('=') {
+            let after_eq = after_eq.trim_start();
             if let Some(first_char) = after_eq.chars().next() {
                 if first_char == '"' || first_char == '\'' {
                     let quote = first_char;

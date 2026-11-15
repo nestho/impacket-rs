@@ -395,6 +395,12 @@ pub struct ConnectionState {
 
 impl ConnectionState {
     pub fn new() -> Self {
+        Self::default()
+    }
+}
+
+impl Default for ConnectionState {
+    fn default() -> Self {
         Self {
             session_id: 0,
             tree_id: 0,
@@ -673,7 +679,7 @@ impl SmbServer {
                 let share_name = unc_path
                     .trim_start_matches('\\')
                     .split('\\')
-                    .last()
+                    .next_back()
                     .unwrap_or("")
                     .to_uppercase();
 
@@ -1109,12 +1115,14 @@ mod tests {
         let test_file = tmp_dir.join("test.txt");
         let _ = fs::write(&test_file, b"Hello from Impacket-RS pure-Rust SMB2 server!");
 
-        let mut config = SmbServerConfig::default();
-        config.shares = vec![
-            SmbShare::new_ipc(),
-            SmbShare::new_disk("TEST", &tmp_dir, "Test Share", false),
-        ];
-        config.challenge = [0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08];
+        let config = SmbServerConfig {
+            shares: vec![
+                SmbShare::new_ipc(),
+                SmbShare::new_disk("TEST", &tmp_dir, "Test Share", false),
+            ],
+            challenge: [0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08],
+            ..Default::default()
+        };
 
         let server = SmbServer::new(config);
         let mut stream = MockStream::new();
@@ -1150,12 +1158,14 @@ mod tests {
             let _ = fs::remove_file(&file_path);
         }
 
-        let mut config = SmbServerConfig::default();
-        config.shares = vec![
-            SmbShare::new_ipc(),
-            SmbShare::new_disk("TESTSHARE", &tmp_dir, "Test Share", false),
-        ];
-        config.challenge = [0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88];
+        let config = SmbServerConfig {
+            shares: vec![
+                SmbShare::new_ipc(),
+                SmbShare::new_disk("TESTSHARE", &tmp_dir, "Test Share", false),
+            ],
+            challenge: [0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88],
+            ..Default::default()
+        };
 
         let server = SmbServer::new(config);
         let mut state = ConnectionState::new();

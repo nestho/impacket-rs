@@ -161,25 +161,17 @@ impl Default for ShadowCopyConfig {
 /// 5. Delete temp files
 /// 6. Delete shadow copy
 pub fn build_extraction_pipeline(config: &ShadowCopyConfig) -> Vec<(String, &'static str)> {
-    let mut steps = Vec::new();
-    
-    // Step 1: Create shadow copy
-    steps.push((
-        build_shadow_create_command_wmic(&config.volume),
-        "create_shadow",
-    ));
-    
-    // Step 2: List shadows to get device path
-    steps.push((
-        build_shadow_list_command(),
-        "list_shadows",
-    ));
-    
-    // Steps 3: Copy hive files
-    // These will be filled in after we know the device path.
-    // Placeholder — the caller must insert copy commands here.
-    
-    steps
+    // Step 1: Create shadow copy; Step 2: List shadows to get device path
+    vec![
+        (
+            build_shadow_create_command_wmic(&config.volume),
+            "create_shadow",
+        ),
+        (
+            build_shadow_list_command(),
+            "list_shadows",
+        ),
+    ]
 }
 
 /// Returns the list of hive names to extract based on configuration.

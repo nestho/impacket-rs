@@ -1969,7 +1969,7 @@ examples:
 
 pub fn canonicalize_name(name: &str) -> &'static str {
     let lower = name.to_ascii_lowercase();
-    let cleaned = lower.replace('-', "").replace('_', "");
+    let cleaned = lower.replace(['-', '_'], "");
     match cleaned.as_str() {
         "secretsdump" => "secretsdump",
         "getnpusers" => "GetNPUsers",

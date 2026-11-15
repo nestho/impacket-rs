@@ -16,8 +16,8 @@ pub fn generate_computer_password() -> String {
     let charset = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*()";
     let seed = impacket_crypto::sha256(b"computer_password_entropy_seed_init");
     let mut out = String::with_capacity(16);
-    for i in 0..16 {
-        let idx = (seed[i] as usize) % charset.len();
+    for &b in seed.iter().take(16) {
+        let idx = (b as usize) % charset.len();
         out.push(charset[idx] as char);
     }
     out
@@ -47,37 +47,34 @@ pub fn build_computer_attributes(
         format!("{}.{}", clean_name, domain_fqdn.to_lowercase())
     };
 
-    let mut attrs = Vec::new();
-
-    // objectClass
-    attrs.push(LdapAttribute {
-        type_name: "objectClass".to_string(),
-        values: vec![
-            b"top".to_vec(),
-            b"person".to_vec(),
-            b"organizationalPerson".to_vec(),
-            b"user".to_vec(),
-            b"computer".to_vec(),
-        ],
-    });
-
-    // sAMAccountName
-    attrs.push(LdapAttribute {
-        type_name: "sAMAccountName".to_string(),
-        values: vec![sam_name.into_bytes()],
-    });
-
-    // userAccountControl
-    attrs.push(LdapAttribute {
-        type_name: "userAccountControl".to_string(),
-        values: vec![UAC_WORKSTATION_TRUST_ACCOUNT.to_string().into_bytes()],
-    });
-
-    // dNSHostName
-    attrs.push(LdapAttribute {
-        type_name: "dNSHostName".to_string(),
-        values: vec![dns_host.as_bytes().to_vec()],
-    });
+    let mut attrs = vec![
+        // objectClass
+        LdapAttribute {
+            type_name: "objectClass".to_string(),
+            values: vec![
+                b"top".to_vec(),
+                b"person".to_vec(),
+                b"organizationalPerson".to_vec(),
+                b"user".to_vec(),
+                b"computer".to_vec(),
+            ],
+        },
+        // sAMAccountName
+        LdapAttribute {
+            type_name: "sAMAccountName".to_string(),
+            values: vec![sam_name.into_bytes()],
+        },
+        // userAccountControl
+        LdapAttribute {
+            type_name: "userAccountControl".to_string(),
+            values: vec![UAC_WORKSTATION_TRUST_ACCOUNT.to_string().into_bytes()],
+        },
+        // dNSHostName
+        LdapAttribute {
+            type_name: "dNSHostName".to_string(),
+            values: vec![dns_host.as_bytes().to_vec()],
+        },
+    ];
 
     // servicePrincipalName
     let mut spns = vec![

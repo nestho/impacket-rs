@@ -152,9 +152,10 @@ impl LdapControl {
 
     /// Creates an RFC 2696 Simple Paged Results Control (`1.2.840.113556.1.4.319`).
     pub fn paged_results(page_size: u32, cookie: &[u8]) -> Self {
-        let mut seq = Vec::new();
-        seq.push(der::encode_integer(page_size as i64));
-        seq.push(der::encode_octet_string(cookie));
+        let seq = vec![
+            der::encode_integer(page_size as i64),
+            der::encode_octet_string(cookie),
+        ];
         let val_bytes = der::encode_sequence(&seq);
         Self {
             control_type: CONTROL_PAGED_RESULTS.to_string(),
@@ -348,10 +349,11 @@ impl LdapMessage {
                 matched_dn,
                 diagnostic_message,
             } => {
-                let mut resp_seq = Vec::new();
-                resp_seq.push(der::encode_tlv(0x0A, &[*result_code as u8]));
-                resp_seq.push(der::encode_octet_string(matched_dn.as_bytes()));
-                resp_seq.push(der::encode_octet_string(diagnostic_message.as_bytes()));
+                let resp_seq = vec![
+                    der::encode_tlv(0x0A, &[*result_code as u8]),
+                    der::encode_octet_string(matched_dn.as_bytes()),
+                    der::encode_octet_string(diagnostic_message.as_bytes()),
+                ];
                 let body = der::encode_sequence(&resp_seq);
                 elements.push(der::encode_tlv(op_tag::SEARCH_RES_DONE, &body[2..]));
             }
@@ -414,10 +416,11 @@ impl LdapMessage {
                 matched_dn,
                 diagnostic_message,
             } => {
-                let mut resp_seq = Vec::new();
-                resp_seq.push(der::encode_tlv(0x0A, &[*result_code as u8]));
-                resp_seq.push(der::encode_octet_string(matched_dn.as_bytes()));
-                resp_seq.push(der::encode_octet_string(diagnostic_message.as_bytes()));
+                let resp_seq = vec![
+                    der::encode_tlv(0x0A, &[*result_code as u8]),
+                    der::encode_octet_string(matched_dn.as_bytes()),
+                    der::encode_octet_string(diagnostic_message.as_bytes()),
+                ];
                 let body = der::encode_sequence(&resp_seq);
                 elements.push(der::encode_tlv(op_tag::MODIFY_RESPONSE, &body[2..]));
             }
@@ -448,10 +451,11 @@ impl LdapMessage {
                 matched_dn,
                 diagnostic_message,
             } => {
-                let mut resp_seq = Vec::new();
-                resp_seq.push(der::encode_tlv(0x0A, &[*result_code as u8]));
-                resp_seq.push(der::encode_octet_string(matched_dn.as_bytes()));
-                resp_seq.push(der::encode_octet_string(diagnostic_message.as_bytes()));
+                let resp_seq = vec![
+                    der::encode_tlv(0x0A, &[*result_code as u8]),
+                    der::encode_octet_string(matched_dn.as_bytes()),
+                    der::encode_octet_string(diagnostic_message.as_bytes()),
+                ];
                 let body = der::encode_sequence(&resp_seq);
                 elements.push(der::encode_tlv(op_tag::ADD_RESPONSE, &body[2..]));
             }
@@ -463,10 +467,11 @@ impl LdapMessage {
                 matched_dn,
                 diagnostic_message,
             } => {
-                let mut resp_seq = Vec::new();
-                resp_seq.push(der::encode_tlv(0x0A, &[*result_code as u8]));
-                resp_seq.push(der::encode_octet_string(matched_dn.as_bytes()));
-                resp_seq.push(der::encode_octet_string(diagnostic_message.as_bytes()));
+                let resp_seq = vec![
+                    der::encode_tlv(0x0A, &[*result_code as u8]),
+                    der::encode_octet_string(matched_dn.as_bytes()),
+                    der::encode_octet_string(diagnostic_message.as_bytes()),
+                ];
                 let body = der::encode_sequence(&resp_seq);
                 elements.push(der::encode_tlv(op_tag::DEL_RESPONSE, &body[2..]));
             }

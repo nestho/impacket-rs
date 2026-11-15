@@ -773,7 +773,7 @@ pub fn parse_both_directory_entries(mut buffer: &[u8]) -> Result<Vec<SmbDirector
 
         let name_bytes = &buffer[94..94 + file_name_length];
         let name_u16: Vec<u16> = name_bytes
-            .chunks_exact(2)
+            .as_chunks::<2>().0.iter()
             .map(|c| u16::from_le_bytes([c[0], c[1]]))
             .collect();
         let name = String::from_utf16_lossy(&name_u16);
@@ -1734,7 +1734,7 @@ mod tests {
     /// Test fixture: drives the real `dump_ntlm_info_over_stream` client against a prebuilt
     /// Windows Server 2025 `SMB2_NEGOTIATE` + `SMB2_SESSION_SETUP` (NTLMSSP Type 2) response pair.
     fn run_dump_ntlm_info_against_fixture() -> Result<DumpNtlmInfoReport, CoreError> {
-    use impacket_auth::{ntlm_flags, NtlmTargetInfo};
+    use impacket_auth::ntlm_flags;
 
     let neg_out = Smb2NegotiateResponseSummary::build_response(
         SmbDialect::Smb311 as u16,
@@ -1742,13 +1742,15 @@ mod tests {
         FileTime::from_unix_secs(1_762_266_000),
         FileTime::from_unix_secs(1_762_000_000),
     );
-    let mut ti = NtlmTargetInfo::default();
-    ti.nb_domain_name = Some("CORP".into());
-    ti.nb_computer_name = Some("DC01".into());
-    ti.dns_domain_name = Some("corp.contoso.com".into());
-    ti.dns_computer_name = Some("dc01.corp.contoso.com".into());
-    ti.dns_tree_name = Some("corp.contoso.com".into());
-    ti.timestamp = Some(FileTime::from_unix_secs(1_762_266_000));
+    let ti = impacket_auth::NtlmTargetInfo {
+        nb_domain_name: Some("CORP".into()),
+        nb_computer_name: Some("DC01".into()),
+        dns_domain_name: Some("corp.contoso.com".into()),
+        dns_computer_name: Some("dc01.corp.contoso.com".into()),
+        dns_tree_name: Some("corp.contoso.com".into()),
+        timestamp: Some(FileTime::from_unix_secs(1_762_266_000)),
+        ..Default::default()
+    };
 
     let chall = NtlmChallengeMessage {
         target_name: "CORP".into(),
@@ -1862,7 +1864,7 @@ mod tests {
         entry1.extend_from_slice(&name1);
         // Pad entry1 to 8-byte boundary.
         let pad1 = (8 - (entry1.len() % 8)) % 8;
-        entry1.extend(std::iter::repeat(0).take(pad1));
+        entry1.extend(std::iter::repeat_n(0, pad1));
         let next_offset = entry1.len() as u32;
         entry1[0..4].copy_from_slice(&next_offset.to_le_bytes());
 

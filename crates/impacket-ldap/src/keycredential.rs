@@ -171,14 +171,15 @@ impl KeyCredentialLinkBlob {
         });
 
         // Compute KeyHash = SHA256 of all entries that follow KeyHash (ID > 2)
-        let mut following_entries = Vec::new();
-        following_entries.push(KeyCredentialEntry::new(IDENTIFIER_KEY_MATERIAL, key_material.clone()));
-        following_entries.push(KeyCredentialEntry::new(IDENTIFIER_KEY_USAGE, vec![key_usage]));
-        following_entries.push(KeyCredentialEntry::new(IDENTIFIER_KEY_SOURCE, vec![key_source]));
-        following_entries.push(KeyCredentialEntry::new(IDENTIFIER_DEVICE_ID, dev_id.to_vec()));
-        following_entries.push(KeyCredentialEntry::new(IDENTIFIER_CUSTOM_KEY_INFORMATION, custom_info.clone()));
-        following_entries.push(KeyCredentialEntry::new(IDENTIFIER_KEY_APPROX_LAST_LOGON, creation_time.to_le_bytes().to_vec()));
-        following_entries.push(KeyCredentialEntry::new(IDENTIFIER_KEY_CREATION_TIME, creation_time.to_le_bytes().to_vec()));
+        let following_entries = vec![
+            KeyCredentialEntry::new(IDENTIFIER_KEY_MATERIAL, key_material.clone()),
+            KeyCredentialEntry::new(IDENTIFIER_KEY_USAGE, vec![key_usage]),
+            KeyCredentialEntry::new(IDENTIFIER_KEY_SOURCE, vec![key_source]),
+            KeyCredentialEntry::new(IDENTIFIER_DEVICE_ID, dev_id.to_vec()),
+            KeyCredentialEntry::new(IDENTIFIER_CUSTOM_KEY_INFORMATION, custom_info.clone()),
+            KeyCredentialEntry::new(IDENTIFIER_KEY_APPROX_LAST_LOGON, creation_time.to_le_bytes().to_vec()),
+            KeyCredentialEntry::new(IDENTIFIER_KEY_CREATION_TIME, creation_time.to_le_bytes().to_vec()),
+        ];
 
         let mut hash_input = Vec::new();
         for entry in &following_entries {
@@ -298,13 +299,11 @@ impl KeyCredentialLinkBlob {
                         ]));
                     }
                 }
-                IDENTIFIER_KEY_CREATION_TIME => {
-                    if value.len() >= 8 {
-                        creation_time = Some(u64::from_le_bytes([
-                            value[0], value[1], value[2], value[3],
-                            value[4], value[5], value[6], value[7],
-                        ]));
-                    }
+                IDENTIFIER_KEY_CREATION_TIME if value.len() >= 8 => {
+                    creation_time = Some(u64::from_le_bytes([
+                        value[0], value[1], value[2], value[3],
+                        value[4], value[5], value[6], value[7],
+                    ]));
                 }
                 _ => {}
             }

@@ -318,9 +318,7 @@ mod tests {
         type3[24..28].copy_from_slice(&88u32.to_le_bytes());
 
         // Fill dummy MIC at 72..88
-        for i in 72..88 {
-            type3[i] = 0x99;
-        }
+        type3[72..88].fill(0x99);
 
         // MsvAvFlags at 88 + 16 + 28 = 132
         type3[132..134].copy_from_slice(&6u16.to_le_bytes()); // ID 6

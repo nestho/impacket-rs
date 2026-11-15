@@ -52,7 +52,7 @@ fn decode_name(bytes: &[u8], ascii: bool) -> String {
         bytes.iter().map(|&b| b as char).collect()
     } else {
         let units: Vec<u16> = bytes
-            .chunks_exact(2)
+            .as_chunks::<2>().0.iter()
             .map(|c| u16::from_le_bytes([c[0], c[1]]))
             .collect();
         String::from_utf16_lossy(&units)
@@ -297,7 +297,7 @@ pub fn update_hive_checksum(hive_bytes: &mut [u8]) {
         return;
     }
     let mut sum: u32 = 0;
-    for chunk in hive_bytes[0..0x1FC].chunks_exact(4) {
+    for chunk in hive_bytes[0..0x1FC].as_chunks::<4>().0 {
         sum ^= u32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
     }
     hive_bytes[0x1FC..0x200].copy_from_slice(&sum.to_le_bytes());

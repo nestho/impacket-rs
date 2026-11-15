@@ -499,7 +499,7 @@ impl<R: Read + Seek> EseDatabase<R> {
         Ok(())
     }
 
-    fn extract_leaf_entry_data<'a>(flags: u16, data: &'a [u8]) -> &'a [u8] {
+    fn extract_leaf_entry_data(flags: u16, data: &[u8]) -> &[u8] {
         let mut cursor = 0;
         if (flags & TAG_COMMON) != 0 && data.len() >= 2 {
             cursor += 2;
@@ -773,7 +773,7 @@ impl<R: Read + Seek> EseDatabase<R> {
                 if col.code_page == 1200 {
                     // UTF-16LE
                     let u16s: Vec<u16> = raw
-                        .chunks_exact(2)
+                        .as_chunks::<2>().0.iter()
                         .map(|c| u16::from_le_bytes([c[0], c[1]]))
                         .collect();
                     EseValue::Text(String::from_utf16_lossy(&u16s))

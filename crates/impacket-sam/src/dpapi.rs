@@ -44,7 +44,7 @@ impl MasterKeyFile {
         let version = u32::from_le_bytes(buf[0..4].try_into().unwrap());
         let guid_raw = &buf[12..84];
         let guid_u16s: Vec<u16> = guid_raw
-            .chunks_exact(2)
+            .as_chunks::<2>().0.iter()
             .map(|c| u16::from_le_bytes([c[0], c[1]]))
             .take_while(|&u| u != 0)
             .collect();
@@ -276,7 +276,7 @@ impl DpapiBlob {
         let desc_end = (offset + desc_len).min(buf.len());
         let desc_bytes = if offset < buf.len() { &buf[offset..desc_end] } else { &[] };
         let desc_u16s: Vec<u16> = desc_bytes
-            .chunks_exact(2)
+            .as_chunks::<2>().0.iter()
             .map(|c| u16::from_le_bytes([c[0], c[1]]))
             .take_while(|&u| u != 0)
             .collect();

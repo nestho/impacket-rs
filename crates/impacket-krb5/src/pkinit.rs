@@ -293,7 +293,7 @@ fn rsa_sign_sha256(
     private_exponent: &BigUint,
 ) -> Result<Vec<u8>, CoreError> {
     let hash = sha256(msg);
-    let k = (modulus.bit_length() + 7) / 8; // Modulus length in bytes
+    let k = modulus.bit_length().div_ceil(8); // Modulus length in bytes
 
     // DigestInfo for SHA-256: SEQUENCE { SEQUENCE { OID, NULL }, OCTET STRING hash }
     let alg_id = der::encode_sequence(&[der::encode_oid(OID_SHA256), der::encode_tlv(0x05, &[])]);
@@ -307,7 +307,7 @@ fn rsa_sign_sha256(
     let mut em = Vec::with_capacity(k);
     em.push(0x00);
     em.push(0x01);
-    em.extend(std::iter::repeat(0xFF).take(ps_len));
+    em.extend(std::iter::repeat_n(0xFF, ps_len));
     em.push(0x00);
     em.extend_from_slice(&digest_info);
 
@@ -520,12 +520,8 @@ pub fn parse_pkcs12(pfx_bytes: &[u8], password: &str) -> Result<(Vec<u8>, Vec<u8
                 if let Ok((_, bag_item, b_rem)) = der::decode_tlv(bags_seq) {
                     bags_seq = b_rem;
                     if let Ok((_, bag_oid, bag_rem)) = der::decode_tlv(bag_item) {
-                        if let Ok((bv_tag, bv_val, _)) = der::decode_tlv(bag_rem) {
-                            let bag_val = if (bv_tag & 0x1F) == 0 {
-                                bv_val
-                            } else {
-                                bv_val
-                            };
+                        if let Ok((_bv_tag, bv_val, _)) = der::decode_tlv(bag_rem) {
+                            let bag_val = bv_val;
 
                             if bag_oid == OID_CERT_BAG {
                                 // CertBag ::= SEQUENCE { certId OID, certValue [0] EXPLICIT OCTET STRING }
@@ -587,21 +583,17 @@ pub fn parse_pkcs12(pfx_bytes: &[u8], password: &str) -> Result<(Vec<u8>, Vec<u8
 fn decrypt_encrypted_content_info(ec_info: &[u8], password: &str) -> Result<Vec<u8>, CoreError> {
     let (_, _, rem1) = der::decode_tlv(ec_info)?; // skip contentType OID
     let (_, alg_id, rem2) = der::decode_tlv(rem1)?; // AlgorithmIdentifier
-    let (ct_tag, ct_val, _) = der::decode_tlv(rem2)?; // encryptedContent [0] IMPLICIT OCTET STRING
+    let (_ct_tag, ct_val, _) = der::decode_tlv(rem2)?; // encryptedContent [0] IMPLICIT OCTET STRING
 
-    let ciphertext = if (ct_tag & 0x1F) == 0 {
-        ct_val
-    } else {
-        ct_val
-    };
+    let ciphertext = ct_val;
 
     decrypt_with_algorithm(alg_id, ciphertext, password)
 }
 
 fn decrypt_encrypted_private_key_info(epki: &[u8], password: &str) -> Result<Vec<u8>, CoreError> {
     let (_, alg_id, rem) = der::decode_tlv(epki)?;
-    let (ct_tag, ct_val, _) = der::decode_tlv(rem)?;
-    let ciphertext = if ct_tag == 0x04 { ct_val } else { ct_val };
+    let (_ct_tag, ct_val, _) = der::decode_tlv(rem)?;
+    let ciphertext = ct_val;
     decrypt_with_algorithm(alg_id, ciphertext, password)
 }
 
@@ -648,7 +640,7 @@ fn decrypt_pkcs12_3des(
     password: &str,
     iterations: usize,
 ) -> Result<Vec<u8>, CoreError> {
-    if ciphertext.len() % 8 != 0 {
+    if !ciphertext.len().is_multiple_of(8) {
         return Err(CoreError::ProtocolError("Ciphertext length not multiple of 8 for 3DES".into()));
     }
     let key_bytes = pkcs12_kdf(1, salt, password, iterations, 24);
@@ -669,7 +661,7 @@ fn decrypt_pbes2(
     iv: &[u8],
     password: &str,
 ) -> Result<Vec<u8>, CoreError> {
-    if ciphertext.len() % 16 != 0 {
+    if !ciphertext.len().is_multiple_of(16) {
         return Err(CoreError::ProtocolError("Ciphertext length not multiple of 16 for AES".into()));
     }
     let pass_bytes = password.as_bytes();
@@ -715,7 +707,7 @@ pub fn pkcs12_kdf(
 
     // Construct S: salt padded to multiple of v bytes
     let s_pad = if !salt.is_empty() {
-        let count = ((salt.len() + v - 1) / v) * v;
+        let count = salt.len().div_ceil(v) * v;
         let mut s = Vec::with_capacity(count);
         while s.len() < count {
             s.extend_from_slice(salt);
@@ -739,7 +731,7 @@ pub fn pkcs12_kdf(
     };
 
     let p_pad = if !p_bytes.is_empty() {
-        let count = ((p_bytes.len() + v - 1) / v) * v;
+        let count = p_bytes.len().div_ceil(v) * v;
         let mut p = Vec::with_capacity(count);
         while p.len() < count {
             p.extend_from_slice(&p_bytes);
@@ -755,7 +747,7 @@ pub fn pkcs12_kdf(
     i_data.extend_from_slice(&s_pad);
     i_data.extend_from_slice(&p_pad);
 
-    let c = (key_len + u - 1) / u;
+    let c = key_len.div_ceil(u);
     let mut out = Vec::with_capacity(c * u);
 
     for block_idx in 0..c {

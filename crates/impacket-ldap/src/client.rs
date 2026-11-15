@@ -414,10 +414,8 @@ impl<S: Read + Write> LdapClient<S> {
                         )));
                     }
                 }
-                ProtocolOp::Other { tag, .. } => {
-                    if tag == op_tag::SEARCH_RES_DONE {
-                        break;
-                    }
+                ProtocolOp::Other { tag, .. } if tag == op_tag::SEARCH_RES_DONE => {
+                    break;
                 }
                 _ => {}
             }
@@ -508,16 +506,14 @@ impl<S: Read + Write> LdapClient<S> {
                             )));
                         }
                     }
-                    ProtocolOp::Other { tag, .. } => {
-                        if tag == op_tag::SEARCH_RES_DONE {
-                            for ctrl in &msg.controls {
-                                if let Some(c) = ctrl.parse_paged_results_cookie() {
-                                    next_cookie = Some(c);
-                                    break;
-                                }
+                    ProtocolOp::Other { tag, .. } if tag == op_tag::SEARCH_RES_DONE => {
+                        for ctrl in &msg.controls {
+                            if let Some(c) = ctrl.parse_paged_results_cookie() {
+                                next_cookie = Some(c);
+                                break;
                             }
-                            break;
                         }
+                        break;
                     }
                     _ => {}
                 }

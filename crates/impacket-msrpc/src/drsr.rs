@@ -720,6 +720,7 @@ pub fn parse_drs_get_nc_changes_response(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 fn scan_attributes_from_raw(
     raw: &[u8],
     session_key: &[u8],
@@ -751,7 +752,7 @@ fn scan_attributes_from_raw(
                 if let Some((val, advance)) = read_attr_val(&raw[idx + 4..]) {
                     if let Ok(s) = decode_utf16le(val) {
                         let clean = s.trim_end_matches('\0').to_string();
-                        if let Some(d) = clean.split('@').last() {
+                        if let Some(d) = clean.split('@').next_back() {
                             *domain = Some(d.to_string());
                         }
                         *upn = Some(clean);

@@ -135,13 +135,7 @@ pub fn revoke_rights<S: Read + Write>(
 
     if let Some(mut dacl) = sd.dacl.take() {
         let initial_len = dacl.aces.len();
-        dacl.aces.retain(|ace| {
-            if ace.sid == *trustee_sid {
-                false
-            } else {
-                true
-            }
-        });
+        dacl.aces.retain(|ace| ace.sid != *trustee_sid);
         removed = initial_len - dacl.aces.len();
         sd.dacl = Some(dacl);
     }

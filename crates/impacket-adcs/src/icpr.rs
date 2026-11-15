@@ -143,8 +143,7 @@ pub fn build_cert_server_request_stub(
     let req_ref = if request_der_or_b64.is_empty() {
         0
     } else {
-        let r = ref_id;
-        r
+        ref_id
     };
     write_cert_trans_blob(&mut w, request_der_or_b64, req_ref);
 

@@ -196,7 +196,7 @@ pub fn format_reg_data(dw_type: u32, data: &[u8]) -> String {
         reg_type::REG_MULTI_SZ => {
             let mut items = Vec::new();
             let mut cur = Vec::new();
-            for chunk in data.chunks_exact(2) {
+            for &chunk in data.as_chunks::<2>().0 {
                 if chunk == [0, 0] {
                     if !cur.is_empty() {
                         if let Ok(s) = decode_utf16le(&cur) {
@@ -205,7 +205,7 @@ pub fn format_reg_data(dw_type: u32, data: &[u8]) -> String {
                         cur.clear();
                     }
                 } else {
-                    cur.extend_from_slice(chunk);
+                    cur.extend_from_slice(&chunk);
                 }
             }
             items.join(", ")
@@ -442,7 +442,7 @@ pub fn build_base_reg_query_info_key_stub(hkey: &RegHandle, class_buf_len: u32) 
     w.write_u16(class_buf_len as u16); // MaximumLength
     w.write_u32(REFERENT_BASE); // Buffer referent
     // Deferred conformant+varying array for lpClassIn buffer (empty)
-    w.write_u32((class_buf_len / 2) as u32); // max_count (WCHARs)
+    w.write_u32(class_buf_len / 2); // max_count (WCHARs)
     w.write_u32(0); // offset
     w.write_u32(0); // actual_count
     w.into_bytes()
@@ -825,14 +825,9 @@ impl<T: RpcTransport> RrpClient<T> {
     ) -> Result<Vec<(String, u32, Vec<u8>)>, CoreError> {
         let mut vals = Vec::new();
         let mut idx = 0u32;
-        loop {
-            match self.enum_value(hkey, idx)? {
-                Some(v) => {
-                    vals.push(v);
-                    idx += 1;
-                }
-                None => break,
-            }
+        while let Some(v) = self.enum_value(hkey, idx)? {
+            vals.push(v);
+            idx += 1;
         }
         Ok(vals)
     }
@@ -844,14 +839,9 @@ impl<T: RpcTransport> RrpClient<T> {
     ) -> Result<Vec<String>, CoreError> {
         let mut keys = Vec::new();
         let mut idx = 0u32;
-        loop {
-            match self.enum_key(hkey, idx)? {
-                Some(k) => {
-                    keys.push(k);
-                    idx += 1;
-                }
-                None => break,
-            }
+        while let Some(k) = self.enum_key(hkey, idx)? {
+            keys.push(k);
+            idx += 1;
         }
         Ok(keys)
     }

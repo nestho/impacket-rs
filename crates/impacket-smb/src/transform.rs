@@ -182,7 +182,7 @@ impl Smb3EncryptionState {
                 available: transform_packet.len(),
             });
         }
-        if &transform_packet[0..4] != &SMB2_TRANSFORM_HEADER_MAGIC {
+        if transform_packet[0..4] != SMB2_TRANSFORM_HEADER_MAGIC {
             return Err(CoreError::ProtocolError(
                 "Invalid SMB2_TRANSFORM_HEADER protocol id".into(),
             ));

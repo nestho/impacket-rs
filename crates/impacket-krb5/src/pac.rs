@@ -126,8 +126,10 @@ impl PacClientInfo {
         }
         let name_bytes = &data[10..10 + name_len];
         let utf16: Vec<u16> = name_bytes
-            .chunks_exact(2)
-            .map(|c| u16::from_le_bytes(c.try_into().unwrap()))
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|&c| u16::from_le_bytes(c))
             .collect();
         let name = String::from_utf16_lossy(&utf16);
         Ok(Self { client_id, name })
@@ -243,7 +245,7 @@ impl PacLogonInfo {
 
     /// Converts Windows FILETIME to Unix timestamp (seconds since 1970).
     pub fn filetime_to_unix(ft: u64) -> Option<i64> {
-        if ft == 0 || ft >= 0x7FFF_FFFF_FFFF_0000 || ft < 116_444_736_000_000_000 {
+        if ft == 0 || !(116_444_736_000_000_000..0x7FFF_FFFF_FFFF_0000).contains(&ft) {
             None
         } else {
             Some(((ft - 116_444_736_000_000_000) / 10_000_000) as i64)
@@ -453,8 +455,10 @@ fn read_ndr_varying_string(r: &mut NdrReader) -> Result<String, CoreError> {
     let bytes = r.read_bytes(byte_len)?;
     r.align(4)?;
     let utf16: Vec<u16> = bytes
-        .chunks_exact(2)
-        .map(|c| u16::from_le_bytes(c.try_into().unwrap()))
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|&c| u16::from_le_bytes(c))
         .collect();
     let s = String::from_utf16_lossy(&utf16);
     Ok(s.trim_end_matches('\0').to_string())
@@ -550,10 +554,10 @@ impl Pac {
             info_headers.extend_from_slice(&(offset_data as u64).to_le_bytes());
 
             data_blobs.extend_from_slice(data);
-            let pad_len = ((size + 7) / 8 * 8) - size;
-            data_blobs.extend(std::iter::repeat(0u8).take(pad_len));
+            let pad_len = size.div_ceil(8) * 8 - size;
+            data_blobs.extend(std::iter::repeat_n(0u8, pad_len));
 
-            offset_data = (offset_data + size + 7) / 8 * 8;
+            offset_data = (offset_data + size).div_ceil(8) * 8;
         }
 
         let mut out = Vec::with_capacity(headers_size + data_blobs.len());

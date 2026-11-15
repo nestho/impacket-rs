@@ -352,11 +352,7 @@ impl DnsRpcRecord {
         let reserved = u32::from_le_bytes([slice[16], slice[17], slice[18], slice[19]]);
         let timestamp = u32::from_le_bytes([slice[20], slice[21], slice[22], slice[23]]);
 
-        let payload_len = if data_len >= 22 {
-            data_len - 22
-        } else {
-            0
-        };
+        let payload_len = data_len.saturating_sub(22);
 
         let end_idx = (24 + payload_len).min(slice.len());
         let payload = &slice[24..end_idx];

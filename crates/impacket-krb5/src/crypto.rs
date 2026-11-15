@@ -98,7 +98,7 @@ pub fn nfold(input: &[u8], nbytes: usize) -> Vec<u8> {
             let val = if remain == 0 {
                 input[idx1]
             } else {
-                (input[idx1] >> remain) | ((input[idx2] << (8 - remain)) & 0xFF)
+                (input[idx1] >> remain) | (input[idx2] << (8 - remain))
             };
             bigstr.push(val);
         }

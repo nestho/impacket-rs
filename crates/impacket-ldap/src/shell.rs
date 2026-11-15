@@ -690,7 +690,7 @@ impl<S: std::io::Read + std::io::Write> LdapShellSession<S> {
             100,
         )?;
 
-        out.push_str(&format!("\n[+] Total Active Directory Objects:\n"));
+        out.push_str("\n[+] Total Active Directory Objects:\n");
         out.push_str(&format!("   Users:     {}\n", users.len()));
         out.push_str(&format!("   Computers: {}\n", computers.len()));
         Ok(out)

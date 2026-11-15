@@ -102,9 +102,9 @@ impl LapsEncryptedBlob {
 
         // 2. content [0] EXPLICIT EnvelopedData
         let (env_tag, env_data_val, _) = decode_tlv(rest)?;
-        if (env_tag & 0x1F) != 0 && (env_tag & 0xC0) != 0x80 && (env_tag & 0xC0) != 0xA0 {
+        if env_tag != 0xA0 {
             return Err(CoreError::ProtocolError(format!(
-                "Expected [0] EXPLICIT tag for EnvelopedData, got 0x{:02X}",
+                "Expected [0] EXPLICIT tag for EnvelopedData (0xA0), got 0x{:02X}",
                 env_tag
             )));
         }

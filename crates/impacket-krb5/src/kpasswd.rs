@@ -229,6 +229,7 @@ pub fn build_kpasswd_krb_priv(
 }
 
 /// Builds the complete RFC 3244 kpasswd request packet with optional 4-byte TCP prefix.
+#[allow(clippy::too_many_arguments)]
 pub fn build_kpasswd_request(
     ticket: &[u8],
     session_key: &[u8],
@@ -422,6 +423,7 @@ pub fn parse_kpasswd_response(
 }
 
 /// Changes a Kerberos user's password over live TCP/464.
+#[allow(clippy::too_many_arguments)]
 pub fn change_password_kpasswd_live(
     kdc_host: &str,
     kdc_port: u16,

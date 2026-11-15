@@ -946,7 +946,7 @@ fn cmd_mssqlclient(args: &[String]) {
         } else {
             &spec.domain
         };
-        let user = spec.username.split('\\').last().unwrap_or(&spec.username);
+        let user = spec.username.split('\\').next_back().unwrap_or(&spec.username);
         println!(
             "[*] Authenticating as Windows user '{}\\{}' (NTLMv2/SSPI) ...",
             domain, user
@@ -1042,8 +1042,8 @@ fn cmd_mssqlclient(args: &[String]) {
             }
             continue;
         }
-        if trimmed.starts_with("xp_cmdshell ") {
-            let cmd = trimmed["xp_cmdshell ".len()..].trim();
+        if let Some(cmd) = trimmed.strip_prefix("xp_cmdshell ") {
+            let cmd = cmd.trim();
             match client.xp_cmdshell(cmd) {
                 Ok(lines) => {
                     for l in lines {
@@ -1172,12 +1172,11 @@ fn cmd_changepasswd(args: &[String]) {
                     i += 1;
                 }
             }
-            "-port" => {
-                if i + 1 < args.len() {
+            "-port"
+                if i + 1 < args.len() => {
                     port = args[i + 1].parse().ok();
                     i += 1;
                 }
-            }
             _ => {}
         }
         i += 1;
@@ -1548,7 +1547,7 @@ fn format_filetime(ft: FileTime) -> String {
 }
 
 fn display_directory_listing(entries: &[impacket_smb::SmbDirectoryEntry]) {
-    println!("{:<6} {:>10}  {:<19}  {}", "Type", "Size", "Last Modified", "Name");
+    println!("{:<6} {:>10}  {:<19}  Name", "Type", "Size", "Last Modified");
     println!("{:-<6} {:-<10}  {:-<19}  {:-<20}", "", "", "", "");
     for e in entries {
         let type_str = if e.is_directory { "<DIR>" } else { "FILE" };
@@ -2173,7 +2172,8 @@ fn cmd_secretsdump(args: &[String]) {
     }
 
     // Download saved hives from C$\Windows\Temp and clean up
-    let download = (|| -> Result<(Vec<u8>, Vec<u8>, Option<Vec<u8>>), CoreError> {
+    type SavedHives = (Vec<u8>, Vec<u8>, Option<Vec<u8>>);
+    let download = (|| -> Result<SavedHives, CoreError> {
         let mut conn = impacket_smb::SmbConnection::connect(host, 445, spec.compat_profile, DEFAULT_TIMEOUT)?;
         conn.login(&spec.domain, &spec.username, &cred, "impacket-rs")?;
         conn.tree_connect_share(host, "C$")?;
@@ -3968,7 +3968,7 @@ fn cmd_smbclient(args: &[String]) {
                         let server_name = format!(r"\\{}", host);
                         match client.net_share_enum(&server_name) {
                             Ok(shares) => {
-                                println!("{:<18} {:<16} {}", "Share", "Type", "Remark");
+                                println!("{:<18} {:<16} Remark", "Share", "Type");
                                 println!("{:-<18} {:-<16} {:-<20}", "", "", "");
                                 for s in &shares {
                                     println!("{:<18} {:<16} {}", s.netname, s.share_type.name(), s.remark);
@@ -4212,7 +4212,7 @@ fn cmd_smbclient(args: &[String]) {
                 let server_name = format!(r"\\{}", host);
                 match client.net_share_enum(&server_name) {
                     Ok(shares) => {
-                        println!("{:<18} {:<16} {}", "Share", "Type", "Remark");
+                        println!("{:<18} {:<16} Remark", "Share", "Type");
                         println!("{:-<18} {:-<16} {:-<20}", "", "", "");
                         for s in &shares {
                             println!("{:<18} {:<16} {}", s.netname, s.share_type.name(), s.remark);
@@ -6323,12 +6323,11 @@ fn cmd_rpcmap(args: &[String]) {
             "-brute-opnums" => {
                 brute_opnums = true;
             }
-            "-max-opnum" => {
-                if i + 1 < args.len() {
+            "-max-opnum"
+                if i + 1 < args.len() => {
                     max_opnum = args[i + 1].parse().unwrap_or(32);
                     i += 1;
                 }
-            }
             _ => {}
         }
         i += 1;
@@ -6567,7 +6566,7 @@ fn cmd_rpcmap(args: &[String]) {
     if discovered.is_empty() {
         println!("  No active RPC interfaces responded to queries on this endpoint.");
     } else {
-        println!("{:<38} {:<8} {:<30} {}", "Interface UUID", "Version", "Name", "Description");
+        println!("{:<38} {:<8} {:<30} Description", "Interface UUID", "Version", "Name");
         println!("{:-<38} {:-<8} {:-<30} {:-<40}", "", "", "", "");
         for iface in &discovered {
             println!(
@@ -7619,7 +7618,7 @@ fn cmd_ticketer(args: &[String]) {
             }
         }
     } else {
-        std::fs::write(&out_path, &ccache.to_bytes())
+        std::fs::write(&out_path, ccache.to_bytes())
     };
 
     match write_res {
@@ -8217,7 +8216,7 @@ fn cmd_rbcd(args: &[String]) {
                     } else {
                         println!("[+] Allowed RBCD Trustee SIDs ({}):", sids.len());
                         for s in sids {
-                            println!("    -> {}", s.to_string());
+                            println!("    -> {}", s);
                         }
                     }
                 }
@@ -8232,7 +8231,7 @@ fn cmd_rbcd(args: &[String]) {
                     std::process::exit(1);
                 }
             };
-            println!("[*] Configuring RBCD: granting '{}' rights to act on behalf of other identity to '{}'...", grantee.to_string(), target_dn);
+            println!("[*] Configuring RBCD: granting '{}' rights to act on behalf of other identity to '{}'...", grantee, target_dn);
             match write_rbcd(&mut client, &target_dn, &grantee) {
                 Ok(()) => println!("[+] RBCD configuration successfully written!"),
                 Err(e) => eprintln!("[-] RBCD write failed: {}", e),
@@ -8369,7 +8368,7 @@ fn cmd_find_delegation(args: &[String]) {
             println!("  DN               : {}", r.dn);
             println!("  Allowed SIDs ({}):", allowed_sids.len());
             for s in allowed_sids {
-                println!("    -> {}", s.to_string());
+                println!("    -> {}", s);
             }
             println!();
         }
@@ -8808,7 +8807,7 @@ fn cmd_split(args: &[String]) {
     };
 
     let total = data.len();
-    let num_chunks = (total + chunk_size - 1) / chunk_size;
+    let num_chunks = total.div_ceil(chunk_size);
     println!("[*] Splitting '{}' ({} bytes) into {} chunks of {} bytes...", file_path, total, num_chunks, chunk_size);
     for idx in 0..num_chunks {
         let start = idx * chunk_size;
@@ -9043,7 +9042,7 @@ fn cmd_dacledit(args: &[String]) {
                                 0x05 => "ACCESS_ALLOWED_OBJECT",
                                 _ => "OTHER",
                             };
-                            println!("  [{}] Type: {} | Mask: 0x{:08X} | Trustee: {}", idx + 1, type_str, ace.mask, ace.sid.to_string());
+                            println!("  [{}] Type: {} | Mask: 0x{:08X} | Trustee: {}", idx + 1, type_str, ace.mask, ace.sid);
                         }
                     } else {
                         println!("[*] Object does not have a DACL.");
@@ -9060,7 +9059,7 @@ fn cmd_dacledit(args: &[String]) {
                     std::process::exit(1);
                 }
             };
-            println!("[*] Granting {:?} on '{}' to trustee '{}'...", dacl_right, dn, trustee.to_string());
+            println!("[*] Granting {:?} on '{}' to trustee '{}'...", dacl_right, dn, trustee);
             match grant_right(&mut client, &dn, &trustee, dacl_right) {
                 Ok(()) => println!("[+] DACL modification written successfully!"),
                 Err(e) => eprintln!("[-] DACL modification failed: {}", e),
@@ -9074,7 +9073,7 @@ fn cmd_dacledit(args: &[String]) {
                     std::process::exit(1);
                 }
             };
-            println!("[*] Revoking ACEs for trustee '{}' from '{}'...", trustee.to_string(), dn);
+            println!("[*] Revoking ACEs for trustee '{}' from '{}'...", trustee, dn);
             match revoke_rights(&mut client, &dn, &trustee) {
                 Ok(count) => println!("[+] Revoked {} ACE(s) matching trustee.", count),
                 Err(e) => eprintln!("[-] DACL revoke failed: {}", e),
@@ -9663,7 +9662,7 @@ fn cmd_get_st(args: &[String]) {
         );
         s4u_self_req.s4u2self_user = Some(imp_user.clone());
 
-        let s4u_self_rep = match get_tgs_live(&kdc_host, 88, &s4u_self_req, now_unix, DEFAULT_TIMEOUT) {
+        let s4u_self_rep = match get_tgs_live(kdc_host, 88, &s4u_self_req, now_unix, DEFAULT_TIMEOUT) {
             Ok(r) => r,
             Err(e) => {
                 eprintln!("[-] S4U2Self failed: {}", e);
@@ -9684,7 +9683,7 @@ fn cmd_get_st(args: &[String]) {
         );
         s4u_proxy_req.additional_tickets = vec![s4u_self_rep.ticket_raw.clone()];
 
-        let s4u_proxy_rep = match get_tgs_live(&kdc_host, 88, &s4u_proxy_req, now_unix, DEFAULT_TIMEOUT) {
+        let s4u_proxy_rep = match get_tgs_live(kdc_host, 88, &s4u_proxy_req, now_unix, DEFAULT_TIMEOUT) {
             Ok(r) => r,
             Err(e) => {
                 eprintln!("[-] S4U2Proxy failed: {}", e);
@@ -9744,7 +9743,7 @@ fn cmd_get_st(args: &[String]) {
         );
         tgs_req.with_u2u(server_tgt_bytes);
 
-        let rep = match get_tgs_live(&kdc_host, 88, &tgs_req, now_unix, DEFAULT_TIMEOUT) {
+        let rep = match get_tgs_live(kdc_host, 88, &tgs_req, now_unix, DEFAULT_TIMEOUT) {
             Ok(r) => r,
             Err(e) => {
                 eprintln!("[-] U2U Service Ticket request failed: {}", e);
@@ -9769,7 +9768,7 @@ fn cmd_get_st(args: &[String]) {
             session_etype,
             &[KerberosEType::Rc4Hmac, KerberosEType::Aes256CtsHmacSha1_96],
         );
-        let rep = match get_tgs_live(&kdc_host, 88, &tgs_req, now_unix, DEFAULT_TIMEOUT) {
+        let rep = match get_tgs_live(kdc_host, 88, &tgs_req, now_unix, DEFAULT_TIMEOUT) {
             Ok(r) => r,
             Err(e) => {
                 eprintln!("[-] Service Ticket request failed: {}", e);
@@ -9788,7 +9787,7 @@ fn cmd_get_st(args: &[String]) {
     if save_ccache {
         let filename = format!("{}.ccache", final_client);
         let ccache = final_rep.to_ccache(&spec.domain, &final_client, &session_key, session_etype as u16);
-        if let Err(e) = std::fs::write(&filename, &ccache.to_bytes()) {
+        if let Err(e) = std::fs::write(&filename, ccache.to_bytes()) {
             eprintln!("[-] Failed to save ccache: {}", e);
         } else {
             println!("[+] Saved service ticket to '{}'", filename);
@@ -9888,18 +9887,20 @@ fn cmd_smbserver(args: &[String]) {
         return;
     }
 
-    let mut config = SmbServerConfig::default();
-    config.listen_addr = interface;
-    config.listen_port = port;
-    config.username = username.clone();
-    config.password = password.clone();
-    config.nt_hash = nt_hash;
-    config.allow_anonymous = username.is_none() && nt_hash.is_none();
-
-    config.shares = vec![
-        SmbShare::new_ipc(),
-        SmbShare::new_disk(share_name, p, &comment, read_only),
-    ];
+    let allow_anonymous = username.is_none() && nt_hash.is_none();
+    let config = SmbServerConfig {
+        listen_addr: interface,
+        listen_port: port,
+        username: username.clone(),
+        password: password.clone(),
+        nt_hash,
+        allow_anonymous,
+        shares: vec![
+            SmbShare::new_ipc(),
+            SmbShare::new_disk(share_name, p, &comment, read_only),
+        ],
+        ..Default::default()
+    };
 
     println!("[*] Initializing Impacket-RS pure-Rust SMB2 server...");
     println!("  Share name : {}", share_name);
@@ -11457,7 +11458,7 @@ fn cmd_net(args: &[String]) {
                 println!("User name                    {}", info.username);
                 println!("Full Name                    {}", info.full_name);
                 println!("Comment                      {}", info.admin_comment);
-                println!("User's Comment               {}", "");
+                println!("User's Comment               ");
                 println!("Country/region code          000 (System Default)");
                 println!("Account active               {}", if info.account_disabled() { "No" } else { "Yes" });
                 println!("Account expires              Never");
@@ -12019,7 +12020,7 @@ fn cmd_wspsearch(args: &[String]) {
             if trimmed.is_empty() {
                 println!("[-] No matching documents or files found in index.");
             } else {
-                println!("{:<30} {:<12} {}", "Filename", "Size (bytes)", "Path");
+                println!("{:<30} {:<12} Path", "Filename", "Size (bytes)");
                 println!("{:-<30} {:-<12} {:-<40}", "", "", "");
                 for line in trimmed.lines() {
                     let parts: Vec<&str> = line.split('\t').collect();
@@ -12124,7 +12125,7 @@ fn cmd_rdp_check(args: &[String]) {
         std::process::exit(1);
     }
     let total_resp_len = u16::from_be_bytes([header[2], header[3]]) as usize;
-    if total_resp_len < 4 || total_resp_len > 4096 {
+    if !(4..=4096).contains(&total_resp_len) {
         eprintln!("[-] Invalid TPKT response length: {}", total_resp_len);
         std::process::exit(1);
     }
@@ -12322,8 +12323,8 @@ fn format_vk_type(data_type: u32) -> &'static str {
 fn format_hive_vk(vk: &impacket_sam::reg::Vk) -> String {
     match vk.data_type {
         1 | 2 => {
-            if vk.data.len() % 2 == 0 {
-                let units: Vec<u16> = vk.data.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
+            if vk.data.len().is_multiple_of(2) {
+                let units: Vec<u16> = vk.data.as_chunks::<2>().0.iter().map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
                 String::from_utf16_lossy(&units).trim_end_matches('\0').to_string()
             } else {
                 String::from_utf8_lossy(&vk.data).into_owned()
@@ -12346,8 +12347,8 @@ fn format_hive_vk(vk: &impacket_sam::reg::Vk) -> String {
             }
         }
         7 => {
-            if vk.data.len() % 2 == 0 {
-                let units: Vec<u16> = vk.data.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
+            if vk.data.len().is_multiple_of(2) {
+                let units: Vec<u16> = vk.data.as_chunks::<2>().0.iter().map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
                 let full = String::from_utf16_lossy(&units);
                 let parts: Vec<&str> = full.split('\0').filter(|s| !s.is_empty()).collect();
                 parts.join(", ")

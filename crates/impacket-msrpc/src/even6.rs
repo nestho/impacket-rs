@@ -165,7 +165,7 @@ fn extract_utf16le_strings(bytes: &[u8]) -> Vec<String> {
     while i + 1 < bytes.len() {
         let code = u16::from_le_bytes([bytes[i], bytes[i + 1]]);
         // Check for printable ASCII or common Unicode range
-        if (code >= 0x20 && code <= 0x7e) || code == 0x09 || code == 0x0a || code == 0x0d {
+        if (0x20..=0x7e).contains(&code) || code == 0x09 || code == 0x0a || code == 0x0d {
             current.push(bytes[i]);
             current.push(bytes[i + 1]);
         } else {
@@ -506,9 +506,7 @@ impl<T: RpcTransport> Even6Client<T> {
         let resp = self.call(opnum::EVT_RPC_QUERY_NEXT, stub)?;
         let result = parse_query_next_response(&resp)?;
 
-        if result.status == error_status::ERROR_SUCCESS {
-            Ok(result.event_data)
-        } else if result.status == error_status::ERROR_NO_MORE_ITEMS {
+        if result.status == error_status::ERROR_SUCCESS || result.status == error_status::ERROR_NO_MORE_ITEMS {
             Ok(result.event_data)
         } else {
             Err(CoreError::ProtocolError(format!(

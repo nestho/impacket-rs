@@ -780,13 +780,15 @@ mod tests {
 
     #[test]
     fn test_ntlm_challenge_type2_and_av_pairs_roundtrip() {
-        let mut ti = NtlmTargetInfo::default();
-        ti.nb_domain_name = Some("CONTOSO".into());
-        ti.nb_computer_name = Some("DC01".into());
-        ti.dns_domain_name = Some("contoso.local".into());
-        ti.dns_computer_name = Some("dc01.contoso.local".into());
-        ti.dns_tree_name = Some("contoso.local".into());
-        ti.timestamp = Some(FileTime::from_unix_secs(1_730_000_000));
+        let ti = NtlmTargetInfo {
+            nb_domain_name: Some("CONTOSO".into()),
+            nb_computer_name: Some("DC01".into()),
+            dns_domain_name: Some("contoso.local".into()),
+            dns_computer_name: Some("dc01.contoso.local".into()),
+            dns_tree_name: Some("contoso.local".into()),
+            timestamp: Some(FileTime::from_unix_secs(1_730_000_000)),
+            ..Default::default()
+        };
 
         let chall = NtlmChallengeMessage {
             target_name: "CONTOSO".into(),

@@ -68,7 +68,7 @@ fn header_uid(msg: &[u8]) -> u16 {
 /// Appends a UTF-16LE string, first inserting a 1-byte pad if the current absolute offset is odd
 /// (SMB1 UNICODE strings must start on an even offset relative to the header).
 fn push_unicode_aligned(msg: &mut Vec<u8>, s: &str, nul: bool) {
-    if msg.len() % 2 != 0 {
+    if !msg.len().is_multiple_of(2) {
         msg.push(0);
     }
     msg.extend_from_slice(&encode_utf16le(s));
@@ -371,7 +371,7 @@ impl Smb1Connection {
         // Transaction Name "\PIPE\" (unicode, aligned).
         push_unicode_aligned(&mut msg, r"\PIPE\", true);
         // Pad data to a 4-byte boundary, then the DCE/RPC PDU.
-        while (msg.len() % 4) != 0 {
+        while !msg.len().is_multiple_of(4) {
             msg.push(0);
         }
         let data_offset = msg.len();

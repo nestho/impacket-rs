@@ -106,7 +106,7 @@ impl<R: Read + Seek> NtdsParser<R> {
 
             if decrypted.len() >= 32 {
                 let pek_items = &decrypted[32..];
-                for chunk in pek_items.chunks_exact(20) {
+                for chunk in pek_items.as_chunks::<20>().0 {
                     let mut pek = [0u8; 16];
                     pek.copy_from_slice(&chunk[4..20]);
                     peks.push(pek);
@@ -211,7 +211,7 @@ impl<R: Read + Seek> NtdsParser<R> {
             .ok_or_else(|| CoreError::ProtocolError(format!("PEK index {} out of range", pek_idx)))?;
 
         // Try modern AES-128-CBC first if enc_hash length is multiple of 16
-        let decrypted_layer = if (enc_hash.len() % 16) == 0 && enc_hash.len() >= 16 {
+        let decrypted_layer = if enc_hash.len().is_multiple_of(16) && !enc_hash.is_empty() {
             aes128::decrypt_cbc(pek, &key_material, enc_hash)
         } else {
             // Legacy MD5 + RC4
