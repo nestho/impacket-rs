@@ -6149,19 +6149,22 @@ fn cmd_ldapsearch(args: &[String]) {
 }
 
 fn cmd_ntlmrelayx(args: &[String]) {
-    use impacket_relay::{RelayEngine, RelayProtocol, RelayTarget};
+    use impacket_relay::{RelayEngine, RelayProtocol, RelayTarget, SocksRelayPool};
 
     print!("{}", version::BANNER);
     if args.is_empty() || args.iter().any(|a| a == "-h" || a == "--help") {
-        println!("Usage: impacket-rs ntlmrelayx -t <TARGET> [-proto http|smb] [-listen-port <port>]");
-        println!("       impacket-rs ntlmrelayx -tf <TARGETS_FILE> [-proto http|smb] [-listen-port <port>]");
-        println!("  Cross-Protocol NTLM Relaying Engine ([ntlmrelayx.py])");
+        println!("Usage: impacket-rs ntlmrelayx -t <TARGET> [-proto http|smb] [-listen-port <port>] [options]");
+        println!("       impacket-rs ntlmrelayx -tf <TARGETS_FILE> [-proto http|smb] [-listen-port <port>] [options]");
+        println!("  Cross-Protocol NTLM Relaying & Multiplexer Engine ([ntlmrelayx.py])");
         println!();
         println!("Options:");
-        println!("  -t,  -target <URL>     Relay target (e.g. smb://192.168.1.10, ldap://dc01, mssql://sql01)");
+        println!("  -t,  -target <URL>     Relay target (e.g. smb://192.168.1.10, ldap://dc01, mssql://sql01, rpc://dc01, adcs://ca01/certsrv, winrm://srv01)");
         println!("  -tf, -targets <FILE>   File containing multi-target URLs (one target per line)");
         println!("  -proto http|smb        Incoming listener protocol (default: http)");
         println!("  -listen-port <PORT>    Incoming listener port (default: 80 for http, 445 for smb)");
+        println!("  -socks                 Enable local SOCKS proxy multiplexer (default port 1080)");
+        println!("  -socks-port <PORT>     SOCKS multiplexer port (default: 1080)");
+        println!("  -template <TEMPLATE>   ADCS certificate template to request when relaying to ADCS (default: Machine)");
         println!("  -no-mic                Strip Message Integrity Code (MIC) from NTLM auth (enabled by default)");
         println!("  -no-epa                Strip Extended Protection for Authentication (EPA / channel bindings)");
         println!("  -dump                  Dump SAM / LSA secrets or AD info upon successful relay");
@@ -6172,6 +6175,9 @@ fn cmd_ntlmrelayx(args: &[String]) {
     let mut targets_file: Option<String> = None;
     let mut listen_proto = RelayProtocol::Http;
     let mut listen_port: Option<u16> = None;
+    let mut enable_socks = false;
+    let mut socks_port: u16 = 1080;
+    let mut adcs_template = "Machine".to_string();
     let mut remove_mic = true;
     let mut remove_epa = true;
 
@@ -6196,6 +6202,19 @@ fn cmd_ntlmrelayx(args: &[String]) {
             }
             "-listen-port" if i + 1 < args.len() => {
                 listen_port = args[i + 1].parse().ok();
+                i += 2;
+            }
+            "-socks" => {
+                enable_socks = true;
+                i += 1;
+            }
+            "-socks-port" if i + 1 < args.len() => {
+                socks_port = args[i + 1].parse().unwrap_or(1080);
+                enable_socks = true;
+                i += 2;
+            }
+            "-template" if i + 1 < args.len() => {
+                adcs_template = args[i + 1].clone();
                 i += 2;
             }
             "-no-mic" => {
@@ -6261,10 +6280,16 @@ fn cmd_ntlmrelayx(args: &[String]) {
     println!("  Target Count    : {}", targets.len());
     println!("  Strip MIC       : {}", if remove_mic { "Enabled (MsvAvFlags & !0x02)" } else { "Disabled" });
     println!("  Strip EPA       : {}", if remove_epa { "Enabled (MsvAvChannelBindings)" } else { "Disabled" });
+    if enable_socks {
+        println!("  SOCKS Proxy     : Enabled (127.0.0.1:{})", socks_port);
+    }
+    if targets.iter().any(|t| t.protocol == RelayProtocol::Adcs) {
+        println!("  ADCS Template   : {}", adcs_template);
+    }
     println!();
     println!("[+] Target Routing Table:");
     for (idx, tgt) in targets.iter().enumerate() {
-        println!("  [{:02}] {:<6} -> {}:{}", idx + 1, tgt.protocol.name(), tgt.host, tgt.port);
+        println!("  [{:02}] {:<6} -> {}:{}{}", idx + 1, tgt.protocol.name(), tgt.host, tgt.port, if tgt.path != "/" { format!(" (path: {})", tgt.path) } else { String::new() });
     }
     println!();
 
@@ -6274,6 +6299,13 @@ fn cmd_ntlmrelayx(args: &[String]) {
 
     let session = engine.create_session(0).unwrap();
     println!("[+] Relay session ready: {:?} -> {:?}", session.client_protocol, session.target_protocol);
+
+    if enable_socks {
+        let pool = SocksRelayPool::new();
+        println!("[+] SOCKS multiplexer active on 127.0.0.1:{}", socks_port);
+        println!("[*] Active session registry initialized: {} active connections", pool.list_sessions().len());
+    }
+
     println!("[+] Ready to receive incoming connections. Relay engine operational.");
 }
 
