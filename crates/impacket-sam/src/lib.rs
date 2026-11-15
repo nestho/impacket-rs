@@ -16,11 +16,13 @@ pub mod lsa;
 pub mod ese;
 pub mod dpapi;
 pub mod ntds;
+pub mod gmsa;
 pub mod gpp;
 pub mod laps;
 pub mod regsecrets;
 pub mod shadowcopy;
 
+pub use gmsa::ManagedPasswordBlob;
 pub use laps::{
     decrypt_laps_blob, parse_laps_json, LapsEncryptedBlob, LapsPasswordResult,
 };

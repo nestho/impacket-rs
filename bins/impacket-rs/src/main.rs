@@ -26,7 +26,7 @@ use impacket_krb5::ccache::CCache;
 use impacket_krb5::{
     change_password_kpasswd_live, extract_pac_from_ticket, extract_session_key_from_as_rep,
     get_np_users_live, get_tgs_live, get_tgt_live, parse_ticket_enc_part, send_as_req_live,
-    send_fast_armored_as_req_live, string_to_key_aes256, FastArmorConfig, KdcAsResponse,
+    send_fast_armored_as_req_live, string_to_key_aes128, string_to_key_aes256, FastArmorConfig, KdcAsResponse,
     KerberosEType, KpasswdResultCode, Krb5AsReq, Krb5TgsReq, Pac, PacLogonInfo, PkinitCredentials,
     PkinitDhState, derive_pkinit_reply_key, TgtSession, CKSUMTYPE_CRC32, CKSUMTYPE_HMAC_MD5, CKSUMTYPE_HMAC_SHA1_96_AES128,
     CKSUMTYPE_HMAC_SHA1_96_AES256, CKSUMTYPE_RSA_MD5, PAC_PRIVSVR_CHECKSUM, PAC_SERVER_CHECKSUM,
@@ -9910,6 +9910,255 @@ fn cmd_get_laps_password(args: &[String]) {
     }
 }
 
+fn cmd_get_gmsa_password(args: &[String]) {
+    if args.is_empty() {
+        eprintln!("Usage: impacket-rs getGMSAPassword <TARGET> [-account <NAME>] [-port <PORT>] [-raw <HEX>]");
+        std::process::exit(1);
+    }
+
+    let mut raw_hex: Option<String> = None;
+    let mut target_account: Option<String> = None;
+    let mut port: u16 = 389;
+    let mut target_str: Option<String> = None;
+
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "-account" if i + 1 < args.len() => {
+                target_account = Some(args[i + 1].clone());
+                i += 2;
+            }
+            "-port" if i + 1 < args.len() => {
+                if let Ok(p) = args[i + 1].parse() {
+                    port = p;
+                }
+                i += 2;
+            }
+            "-raw" if i + 1 < args.len() => {
+                raw_hex = Some(args[i + 1].clone());
+                i += 2;
+            }
+            arg if !arg.starts_with('-') && target_str.is_none() => {
+                target_str = Some(arg.to_string());
+                i += 1;
+            }
+            _ => i += 1,
+        }
+    }
+
+    // 1. Offline Mode (-raw <HEX>)
+    if let Some(hex_str) = raw_hex {
+        println!("[*] Parsing MSDS-MANAGEDPASSWORD_BLOB (offline mode)...");
+        let raw_bytes = match impacket_core::decode_hex(&hex_str) {
+            Ok(b) => b,
+            Err(e) => {
+                eprintln!("[-] Invalid hex string for -raw: {}", e);
+                std::process::exit(1);
+            }
+        };
+        let blob = match impacket_sam::ManagedPasswordBlob::parse(&raw_bytes) {
+            Ok(b) => b,
+            Err(e) => {
+                eprintln!("[-] Failed to parse MSDS-MANAGEDPASSWORD_BLOB: {}", e);
+                std::process::exit(1);
+            }
+        };
+
+        println!("[*] Blob Version: {}", blob.version);
+        let q_days = blob.query_interval / (10_000_000 * 86_400);
+        let u_days = blob.unchanged_interval / (10_000_000 * 86_400);
+        println!("[*] Query Password Interval: {} days ({} ticks)", q_days, blob.query_interval);
+        println!("[*] Unchanged Password Interval: {} days ({} ticks)", u_days, blob.unchanged_interval);
+        println!("[+] Current Password: {}", blob.current_password);
+        println!("[+] Current NT Hash:  {}", blob.current_nt_hash_hex());
+
+        if let Some(ref prev_pwd) = blob.previous_password {
+            println!("[+] Previous Password: {}", prev_pwd);
+            println!("[+] Previous NT Hash:  {}", blob.previous_nt_hash_hex().unwrap_or_default());
+        }
+
+        if let Some(ref acc) = target_account {
+            let sam = if acc.ends_with('$') { acc.clone() } else { format!("{}$", acc) };
+            let domain = target_str
+                .as_deref()
+                .and_then(|t| TargetSpec::parse(t).ok())
+                .map(|s| s.domain)
+                .unwrap_or_default();
+            if !domain.is_empty() {
+                let salt = format!("{}{}", domain.to_uppercase(), sam);
+                let aes256 = string_to_key_aes256(&blob.current_password, &salt, 4096);
+                let aes128 = string_to_key_aes128(&blob.current_password, &salt, 4096);
+                println!("[*] Kerberos Salt: {}", salt);
+                println!("[*] Kerberos Key (AES-256): {}", impacket_core::encode_hex(&aes256));
+                println!("[*] Kerberos Key (AES-128): {}", impacket_core::encode_hex(&aes128));
+            }
+        }
+        return;
+    }
+
+    // 2. Online Mode via LDAP
+    let spec = match parse_target_with_hashes(args) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("[-] Error parsing target: {}", e);
+            std::process::exit(1);
+        }
+    };
+
+    let host = spec.effective_target_ip();
+    let addr = format!("{}:{}", host, port);
+    println!("[*] Connecting to LDAP server at {}...", addr);
+    let mut client = match LdapClient::connect(&addr, DEFAULT_TIMEOUT) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("[-] Failed to connect to LDAP server at {}: {}", addr, e);
+            std::process::exit(1);
+        }
+    };
+
+    let bind_dn = if spec.username.is_empty() {
+        String::new()
+    } else if spec.username.contains('@') || spec.username.to_uppercase().contains("DC=") {
+        spec.username.clone()
+    } else if !spec.domain.is_empty() {
+        format!("{}@{}", spec.username, spec.domain)
+    } else {
+        spec.username.clone()
+    };
+    let password = spec.password.as_ref().map(|p| p.expose_secret()).unwrap_or("");
+    if !bind_dn.is_empty() {
+        println!("[*] Performing LDAP bind as '{}'...", bind_dn);
+        if let Err(e) = client.bind_simple(&bind_dn, password) {
+            eprintln!("[-] LDAP bind failed: {}", e);
+            std::process::exit(1);
+        }
+        println!("[+] Bind successful");
+    } else {
+        println!("[*] Performing anonymous LDAP bind...");
+        if let Err(e) = client.bind_simple("", "") {
+            eprintln!("[-] Anonymous bind failed: {}", e);
+            std::process::exit(1);
+        }
+    }
+
+    let base_dn = domain_to_base_dn(&spec.domain);
+    let filter = if let Some(ref acc) = target_account {
+        let acc_with_dollar = if acc.ends_with('$') { acc.clone() } else { format!("{}$", acc) };
+        filter_and(&[
+            filter_equality("objectClass", "msDS-GroupManagedServiceAccount"),
+            filter_or(&[
+                filter_equality("sAMAccountName", acc),
+                filter_equality("sAMAccountName", &acc_with_dollar),
+            ]),
+        ])
+    } else {
+        filter_equality("objectClass", "msDS-GroupManagedServiceAccount")
+    };
+
+    let attributes = [
+        "sAMAccountName",
+        "dNSHostName",
+        "description",
+        "objectSid",
+        "msDS-ManagedPassword",
+        "msDS-GroupMSAMembership",
+    ];
+    println!("[*] Querying gMSA accounts under '{}'...", base_dn);
+    let entries = match client.search(&base_dn, SearchScope::WholeSubtree, &filter, &attributes) {
+        Ok(e) => e,
+        Err(e) => {
+            eprintln!("[-] LDAP search failed: {}", e);
+            std::process::exit(1);
+        }
+    };
+
+    if entries.is_empty() {
+        println!("[-] No Group Managed Service Accounts (gMSA) found matching query.");
+        return;
+    }
+
+    println!("[+] Found {} gMSA account(s)\n", entries.len());
+
+    for entry in entries {
+        let sam = entry.get_string("sAMAccountName").unwrap_or_else(|| "<unknown>".into());
+        let dns = entry.get_string("dNSHostName").unwrap_or_default();
+        let desc = entry.get_string("description").unwrap_or_default();
+        let sid_str = entry
+            .get_first_raw("objectSid")
+            .and_then(|b| RpcSid::from_le_bytes(b).ok())
+            .map(|s| s.to_string())
+            .unwrap_or_default();
+
+        println!("================================================================================");
+        println!("Account:     {}", sam);
+        if !dns.is_empty() {
+            println!("DNS Name:    {}", dns);
+        }
+        if !sid_str.is_empty() {
+            println!("Object SID:  {}", sid_str);
+        }
+        if !desc.is_empty() {
+            println!("Description: {}", desc);
+        }
+        println!("--------------------------------------------------------------------------------");
+
+        if let Some(raw_blob) = entry.get_first_raw("msDS-ManagedPassword") {
+            match impacket_sam::ManagedPasswordBlob::parse(raw_blob) {
+                Ok(blob) => {
+                    let q_days = blob.query_interval / (10_000_000 * 86_400);
+                    let u_days = blob.unchanged_interval / (10_000_000 * 86_400);
+                    println!("[*] Blob Version: {}", blob.version);
+                    println!("[*] Query Password Interval: {} days ({} ticks)", q_days, blob.query_interval);
+                    println!("[*] Unchanged Password Interval: {} days ({} ticks)", u_days, blob.unchanged_interval);
+                    println!("[+] Current Password: {}", blob.current_password);
+                    println!("[+] Current NT Hash:  {}", blob.current_nt_hash_hex());
+
+                    if let Some(ref prev_pwd) = blob.previous_password {
+                        println!("[+] Previous Password: {}", prev_pwd);
+                        println!("[+] Previous NT Hash:  {}", blob.previous_nt_hash_hex().unwrap_or_default());
+                    }
+
+                    let domain = if !spec.domain.is_empty() {
+                        spec.domain.to_uppercase()
+                    } else {
+                        "DOMAIN".into()
+                    };
+                    let salt = format!("{}{}", domain, sam);
+                    let aes256 = string_to_key_aes256(&blob.current_password, &salt, 4096);
+                    let aes128 = string_to_key_aes128(&blob.current_password, &salt, 4096);
+                    println!("[*] Kerberos Salt: {}", salt);
+                    println!("[*] Kerberos Key (AES-256): {}", impacket_core::encode_hex(&aes256));
+                    println!("[*] Kerberos Key (AES-128): {}", impacket_core::encode_hex(&aes128));
+                }
+                Err(e) => {
+                    println!("[-] Failed to parse msDS-ManagedPassword blob: {}", e);
+                }
+            }
+        } else {
+            println!("[-] msDS-ManagedPassword attribute not returned (Access Denied / Insufficient Rights)");
+        }
+
+        if let Some(sd_bytes) = entry.get_first_raw("msDS-GroupMSAMembership") {
+            match impacket_ldap::SecurityDescriptor::parse(sd_bytes) {
+                Ok(sd) => {
+                    if let Some(ref dacl) = sd.dacl {
+                        println!("[*] Authorized Principals in msDS-GroupMSAMembership DACL ({} ACEs):", dacl.aces.len());
+                        for ace in &dacl.aces {
+                            println!("    -> Trustee SID: {} (Type: 0x{:02X}, Mask: 0x{:08X})", ace.sid, ace.ace_type, ace.mask);
+                        }
+                    } else {
+                        println!("[*] msDS-GroupMSAMembership has no DACL (empty)");
+                    }
+                }
+                Err(e) => {
+                    println!("[-] Failed to parse msDS-GroupMSAMembership SecurityDescriptor: {}", e);
+                }
+            }
+        }
+        println!();
+    }
+}
+
 fn cmd_check_ldap_status(args: &[String]) {
     if args.is_empty() {
         eprintln!("Usage: impacket-rs CheckLDAPStatus <TARGET> [-port <PORT>]");
@@ -12739,6 +12988,9 @@ fn main() {
         Some("GetLAPSPassword") | Some("getlapspassword") | Some("get-laps-password") => {
             cmd_get_laps_password(&args[1..])
         }
+        Some("getGMSAPassword") | Some("getgmsapassword") | Some("get-gmsa-password") | Some("gmsadumper") | Some("gmsa") => {
+            cmd_get_gmsa_password(&args[1..])
+        }
         Some("CheckLDAPStatus") | Some("checkldapstatus") | Some("check-ldap-status") => {
             cmd_check_ldap_status(&args[1..])
         }
@@ -12883,5 +13135,29 @@ mod tests {
         assert_eq!(proxy2.proxy_type, impacket_core::ProxyType::HttpConnect);
         assert_eq!(proxy2.host, "proxy.corp.internal");
         assert_eq!(proxy2.port, 8080);
+    }
+
+    #[test]
+    fn test_gmsa_offline_parsing_and_kerberos_keys() {
+        let blob = impacket_sam::ManagedPasswordBlob {
+            version: 1,
+            current_password: "ComplexGmsaP@ssword2026!#$".into(),
+            current_nt_hash: impacket_sam::compute_nt_hash("ComplexGmsaP@ssword2026!#$"),
+            previous_password: Some("OldGmsaP@ssword2025!".into()),
+            previous_nt_hash: Some(impacket_sam::compute_nt_hash("OldGmsaP@ssword2025!")),
+            query_interval: 25920000000000,
+            unchanged_interval: 25920000000000,
+        };
+        let bytes = blob.to_bytes();
+        let hex_str = impacket_core::encode_hex(&bytes);
+        let parsed = impacket_sam::ManagedPasswordBlob::parse(&impacket_core::decode_hex(&hex_str).unwrap()).unwrap();
+        assert_eq!(parsed.current_password, "ComplexGmsaP@ssword2026!#$");
+        assert_eq!(parsed.previous_password.as_deref(), Some("OldGmsaP@ssword2025!"));
+
+        let salt = format!("{}{}", "CORP.LOCAL", "svc_gmsa$");
+        let aes256 = string_to_key_aes256(&parsed.current_password, &salt, 4096);
+        let aes128 = string_to_key_aes128(&parsed.current_password, &salt, 4096);
+        assert_eq!(aes256.len(), 32);
+        assert_eq!(aes128.len(), 16);
     }
 }

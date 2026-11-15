@@ -158,6 +158,25 @@ examples:
   impacket-rs GetLAPSPassword corp.local/admin:Pass123!@192.168.1.10 -history
   impacket-rs GetLAPSPassword corp.local/admin@192.168.1.10 -hashes :e6fb06210f57e7af5f0ac888128a96db -l2key <64_BYTE_HEX>
 "#),
+        "getGMSAPassword" => Some(r#"Description: Queries Active Directory via LDAP for Group Managed Service Accounts (gMSA) msDS-ManagedPassword blobs and extracts current/previous passwords, NT hashes, intervals, and Kerberos keys.
+
+usage: impacket-rs getGMSAPassword [options] <target>
+
+positional arguments:
+  target: [[domain/]username[:password]@]<targetName or address>
+
+options:
+  -h, --help            show this help message and exit
+  -account name         Target gMSA account name (e.g. svc_gmsa or svc_gmsa$)
+  -raw hex              Offline mode: parse raw MSDS-MANAGEDPASSWORD_BLOB hex string
+  -hashes LMHASH:NTHASH NTLM hashes, format is LMHASH:NTHASH
+  -port port            Destination LDAP port (default: 389)
+
+examples:
+  impacket-rs getGMSAPassword corp.local/jdoe:Pass123!@192.168.1.10
+  impacket-rs getGMSAPassword corp.local/jdoe:Pass123!@192.168.1.10 -account svc_gmsa$
+  impacket-rs getGMSAPassword -raw 01000000...
+"#),
         "GetNPUsers" => Some(r#"Description: Queries Active Directory for accounts with 'Do not require Kerberos preauthentication' (DONT_REQ_PREAUTH) enabled and requests AS-REP ciphertexts to crack offline (AS-REP Roasting).
 
 usage: impacket-rs GetNPUsers [options] <target>
@@ -1956,6 +1975,10 @@ pub fn canonicalize_name(name: &str) -> &'static str {
         "getadusers" => "GetADUsers",
         "getadcomputers" => "GetADComputers",
         "getlapspassword" => "GetLAPSPassword",
+        "getgmsapassword" => "getGMSAPassword",
+        "get-gmsa-password" => "getGMSAPassword",
+        "gmsadumper" => "getGMSAPassword",
+        "gmsa" => "getGMSAPassword",
         "checkldapstatus" => "CheckLDAPStatus",
         "addcomputer" => "addcomputer",
         "dacledit" => "dacledit",
@@ -2049,7 +2072,7 @@ mod tests {
             "smbclient", "ntlmrelayx", "getTGT", "getST", "ticketConverter",
             "ticketer", "samrdump", "lookupsid", "rpcdump", "rpcmap",
             "netview", "reg", "services", "mssqlclient", "GetADUsers",
-            "GetADComputers", "GetLAPSPassword", "CheckLDAPStatus", "addcomputer",
+            "GetADComputers", "GetLAPSPassword", "getGMSAPassword", "CheckLDAPStatus", "addcomputer",
             "dacledit", "owneredit", "dnstool", "ldapsearch", "ldapclient",
             "certipy", "whisker", "coerce", "dfsclient", "getArch", "machine_role", "oxidquery", "samedit",
             "changepasswd", "Get-GPPPassword", "net", "wmiquery", "wmipersist",
