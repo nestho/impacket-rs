@@ -127,6 +127,28 @@ This project follows **Semantic Versioning 2.0.0 (SemVer)** and the exact change
         * Added `-kirbi <FILE>` exporting tickets to Windows Mimikatz `.kirbi` (KRB-CRED App 22) format.
         * Updated help documentation and usage examples.
 
+6. Windows LAPS v2 Decryption & MS-GKDI Group Key Distribution (`crates/impacket-sam`, `crates/impacket-msrpc`, `crates/impacket-crypto` & Phase 3)
+
+    * **RFC 3394 AES Key Wrap & NIST SP 800-108 KDF (`crates/impacket-crypto`)**:
+        * Implemented pure-Rust RFC 3394 / NIST SP 800-38F Key Wrap (`aes_key_wrap`) and Key Unwrap (`aes_key_unwrap`) for 128-bit and 256-bit KEKs.
+        * Validated with official NIST SP 800-38F / RFC 3394 Section 4 test vectors.
+    * **`[MS-GKDI]` Group Key Distribution Protocol Client (`crates/impacket-msrpc::gkdi`)**:
+        * Implemented MSRPC client for `[MS-GKDI]` interface `b9785960-524f-11df-8b6d-83dcded72085` v1.0 over named pipe `\PIPE\protected_storage`.
+        * Implemented `GetKey` (Opnum 0) request builder with target security descriptor and root key GUID parameters.
+        * Added `GroupKeyEnvelope` (`KDSK` / `DSKB` magic) parser extracting hierarchical L0/L1/L2 indices, domain/forest metadata, and 64-byte L2 seed key material.
+    * **Windows LAPS v2 DPAPI-NG Decryption Engine (`crates/impacket-sam::laps`)**:
+        * Added `LapsEncryptedBlob::parse` supporting both raw CMS `ContentInfo` and full 16-byte Active Directory attribute envelopes (`FILETIME` timestamp, size, reserved).
+        * Implemented CMS `EnvelopedData` parser for `KEKRecipientInfo` [2] with 28-byte `KeyIdentifier` (16-byte `RootKeyID`, 4-byte `L0`, 4-byte `L1`, 4-byte `L2`).
+        * Implemented Key Encryption Key (KEK) derivation via NIST SP 800-108 counter mode KDF with label `"KDS service\0"`.
+        * Implemented Content Encryption Key (CEK) recovery via RFC 3394 AES Key Unwrap and payload decryption via AES-256-GCM.
+        * Added pure-Rust JSON payload parser extracting cleartext password, account name, and timestamp.
+    * **`GetLAPSPassword` CLI Upgrades (`bins/impacket-rs`)**:
+        * Enhanced `GetLAPSPassword` to query and process `msLAPS-EncryptedPassword` and `msLAPS-EncryptedPasswordHistory` alongside cleartext `msLAPS-Password` and legacy `ms-Mcs-AdmPwd`.
+        * Added automatic online decryption by connecting to Domain Controller over `[MS-GKDI]` (`\PIPE\protected_storage`) with caching per key generation.
+        * Added `-l2key <HEX>` option for offline decryption using operator-supplied 64-byte L2 seed keys.
+        * Added `-history` flag to discover and decrypt all historical password rotations.
+        * Updated command help documentation and usage examples.
+
 ---
 
 ## [v0.2.1] - 2026-11-13
