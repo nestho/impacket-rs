@@ -129,7 +129,7 @@ examples:
   impacket-rs GetADUsers corp.local/jdoe:Pass123!@192.168.1.10 -all
   impacket-rs GetADUsers corp.local/jdoe@192.168.1.10 -hashes :aad3b435b51404eeaad3b435b51404ee
 "#),
-        "GetLAPSPassword" => Some(r#"Description: Queries Active Directory via LDAP for legacy LAPS and modern Windows LAPS administrator passwords.
+        "GetLAPSPassword" => Some(r#"Description: Queries Active Directory via LDAP for legacy LAPS and modern Windows LAPS v2 administrator passwords, with automatic MS-GKDI / DPAPI-NG decryption.
 
 usage: impacket-rs GetLAPSPassword [options] <target>
 
@@ -139,6 +139,8 @@ positional arguments:
 options:
   -h, --help            show this help message and exit
   -computer <NAME>       Computer account name to retrieve LAPS password for
+  -l2key <HEX>          Manual 64-byte MS-GKDI L2 seed key for offline decryption
+  -history              Also query and decrypt msLAPS-EncryptedPasswordHistory
 
 authentication:
   -hashes LMHASH:NTHASH
@@ -153,6 +155,27 @@ authentication:
 
 examples:
   impacket-rs GetLAPSPassword corp.local/admin:Pass123!@192.168.1.10 -computer DC01
+  impacket-rs GetLAPSPassword corp.local/admin:Pass123!@192.168.1.10 -history
+  impacket-rs GetLAPSPassword corp.local/admin@192.168.1.10 -hashes :e6fb06210f57e7af5f0ac888128a96db -l2key <64_BYTE_HEX>
+"#),
+        "getGMSAPassword" => Some(r#"Description: Queries Active Directory via LDAP for Group Managed Service Accounts (gMSA) msDS-ManagedPassword blobs and extracts current/previous passwords, NT hashes, intervals, and Kerberos keys.
+
+usage: impacket-rs getGMSAPassword [options] <target>
+
+positional arguments:
+  target: [[domain/]username[:password]@]<targetName or address>
+
+options:
+  -h, --help            show this help message and exit
+  -account name         Target gMSA account name (e.g. svc_gmsa or svc_gmsa$)
+  -raw hex              Offline mode: parse raw MSDS-MANAGEDPASSWORD_BLOB hex string
+  -hashes LMHASH:NTHASH NTLM hashes, format is LMHASH:NTHASH
+  -port port            Destination LDAP port (default: 389)
+
+examples:
+  impacket-rs getGMSAPassword corp.local/jdoe:Pass123!@192.168.1.10
+  impacket-rs getGMSAPassword corp.local/jdoe:Pass123!@192.168.1.10 -account svc_gmsa$
+  impacket-rs getGMSAPassword -raw 01000000...
 "#),
         "GetNPUsers" => Some(r#"Description: Queries Active Directory for accounts with 'Do not require Kerberos preauthentication' (DONT_REQ_PREAUTH) enabled and requests AS-REP ciphertexts to crack offline (AS-REP Roasting).
 
@@ -197,6 +220,9 @@ options:
   -spn <SPN>             Request TGS ticket targeting a specific SPN only
   -request-user <USER>   Request TGS tickets targeting a specific user only
   -outputfile <FILE>     Output filename to write captured TGS hashes to
+  -aes                   Request AES-256 and AES-128 tickets (Hashcat modes 19700/19600)
+  -etype <TYPE>          Kerberos encryption type: rc4, aes128, aes256, aes, all
+  -save                  Save acquired tickets to .ccache files
 
 authentication:
   -hashes LMHASH:NTHASH
@@ -492,6 +518,44 @@ examples:
   impacket-rs certipy req corp.local/user:Pass@192.168.1.10 -ca 'corp-DC01-CA' -template ESC1Template -upn administrator@corp.local -out cert.der
   impacket-rs certipy find corp.local/user:Pass@192.168.1.10 -vulnerable
 "#),
+        "whisker" => Some(r#"Description: Active Directory Shadow Credentials management tool ([MS-ADTS] Section 2.2.18.2 msDS-KeyCredentialLink).
+
+usage: impacket-rs whisker <action> [options] <target>
+
+actions:
+  list                  List all shadow credentials on the target account
+  add                   Generate RSA key and inject a shadow credential (msDS-KeyCredentialLink)
+  remove                Remove a shadow credential matching KeyID, DeviceID, or raw string
+  clear                 Clear all shadow credentials on the target account
+
+positional arguments:
+  target: [[domain/]username[:password]@]<targetName or address>
+
+options:
+  -h, --help            show this help message and exit
+  -target-user <SAM>    Target sAMAccountName (e.g. jdoe or dc01$)
+  -target-dn <DN>       Target Distinguished Name
+  -id <ID>              KeyID or DeviceID for remove action
+  -key-out <FILE>       Path to save generated RSA private key (for add action)
+  -base <BASE_DN>       Active Directory Base DN override
+
+authentication:
+  -hashes LMHASH:NTHASH
+                        NTLM hashes, format is LMHASH:NTHASH
+  -no-pass              don't ask for password (useful for -k)
+  -k                    Use Kerberos authentication. Grabs credentials from
+                        ccache file (KRB5CCNAME)
+  -aesKey hex key       AES key to use for Kerberos Authentication (128 or 256 bits)
+  -dc-ip ip address     IP Address of the domain controller
+  -target-ip ip address IP Address of the target machine
+  -port port            Destination port to connect to
+
+examples:
+  impacket-rs whisker list corp.local/admin:Pass@dc01 -target-user victim_user
+  impacket-rs whisker add corp.local/admin:Pass@dc01 -target-user victim_user -key-out victim.key
+  impacket-rs whisker remove corp.local/admin:Pass@dc01 -target-user victim_user -id 12345678-1234-1234-1234-123456789abc
+  impacket-rs whisker clear corp.local/admin:Pass@dc01 -target-user victim_user
+"#),
         "coerce" => Some(r#"Description: Active Directory authentication coercion suite covering MS-EFSR (PetitPotam), MS-RPRN (PrinterBug), MS-FSRVP (ShadowCoerce), and MS-DFSNM (DFSCoerce).
 
 usage: impacket-rs coerce [options] -listener <LISTENER> <target>
@@ -576,6 +640,25 @@ authentication:
 examples:
   impacket-rs dnstool corp.local/jdoe:Pass123!@192.168.1.10 -action query -record dc01
   impacket-rs dnstool corp.local/jdoe:Pass123!@192.168.1.10 -action add -record evil -data 192.168.1.200
+"#),
+        "backupkey" => Some(r#"Description: Interacts with Active Directory BackupKey Remote Protocol (MS-BKRP) to retrieve domain backup certificates and unwrap DPAPI MasterKeys.
+
+usage: impacket-rs backupkey [options] <target>
+
+positional arguments:
+  target: [[domain/]username[:password]@]<targetName or address>
+
+options:
+  -h, --help            show this help message and exit
+  -export prefix        Export domain backup public certificate (<prefix>.crt / <prefix>.der)
+  -restore file         Restore and unwrap DPAPI MasterKey file using Domain Controller
+  -hashes LMHASH:NTHASH NTLM hashes, format is LMHASH:NTHASH
+  -dc-ip ip address     IP Address of the domain controller
+  -target-ip ip address IP Address of the target machine
+
+examples:
+  impacket-rs backupkey corp.local/admin:Pass123!@192.168.1.10 -export domain_backup
+  impacket-rs backupkey corp.local/user:Pass123!@192.168.1.10 -restore /path/to/masterkey_file
 "#),
         "dpapi" => Some(r#"Description: Inspects and decrypts Windows Data Protection API (DPAPI) master keys, credential blobs, and backup keys.
 
@@ -754,7 +837,7 @@ examples:
   export KRB5CCNAME=/tmp/websvc.ccache
 impacket-rs getST corp.local/websvc$ -k -no-pass -spn cifs/fs01.corp.local -impersonate Administrator -dc-ip 192.168.1.10
 "#),
-        "getTGT" => Some(r#"Description: Requests a Kerberos Ticket Granting Ticket (TGT) via AS-REQ using password, NTLM hash, or AES key pre-authentication, saving it to a .ccache file.
+        "getTGT" => Some(r#"Description: Requests a Kerberos Ticket Granting Ticket (TGT) via AS-REQ using password, NTLM hash, AES key, or PKINIT certificate/PFX pre-authentication, saving it to a .ccache or .kirbi file.
 
 usage: impacket-rs getTGT [options] <target>
 
@@ -763,23 +846,27 @@ positional arguments:
 
 options:
   -h, --help            show this help message and exit
-  -dc-ip <IP>            IP Address of the Domain Controller / KDC
-  -outputfile <FILE>     Base name for the output ccache file (default: username.ccache)
+  -dc-ip <IP>           IP Address of the Domain Controller / KDC
+  -port <PORT>          KDC port (default: 88)
+  -out, -outputfile <FILE>
+                        Output CCache ticket file (default: <USER>.ccache)
+  -kirbi <FILE>         Output Windows Mimikatz .kirbi ticket file
+  -save                 Save TGT to default CCache file
 
 authentication:
-  -hashes LMHASH:NTHASH
-                        NTLM hashes, format is LMHASH:NTHASH
-  -no-pass              don't ask for password (useful for -k)
-  -k                    Use Kerberos authentication. Grabs credentials from
-                        ccache file (KRB5CCNAME)
-  -aesKey hex key       AES key to use for Kerberos Authentication (128 or 256 bits)
-  -dc-ip ip address     IP Address of the domain controller
-  -target-ip ip address IP Address of the target machine
-  -port port            Destination port to connect to
+  -hashes LM:NT         NTLM pass-the-hash authentication (:NT)
+  -aesKey <HEX>         AES key to use for Kerberos Authentication (128 or 256 bits)
+  -cert <FILE>          X.509 certificate file (PEM/DER) for PKINIT
+  -key <FILE>           RSA private key file (PEM/DER) for PKINIT
+  -pfx <FILE>           PKCS#12 certificate container (.pfx/.p12) for PKINIT
+  -pfx-pass <PASSWORD>  Password for PKCS#12 container
+  -fast <FILE>          FAST armor ticket file (.ccache or .kirbi, RFC 6113)
 
 examples:
   impacket-rs getTGT corp.local/jdoe:Password123! -dc-ip 192.168.1.10
   impacket-rs getTGT corp.local/admin -hashes :aad3b435b51404eeaad3b435b51404ee -dc-ip 192.168.1.10
+  impacket-rs getTGT corp.local/admin -pfx admin.pfx -pfx-pass Secret123! -dc-ip 192.168.1.10 -out admin.ccache
+  impacket-rs getTGT corp.local/admin -cert admin.crt -key admin.key -dc-ip 192.168.1.10 -kirbi admin.kirbi
 "#),
         "klist" => Some(r#"Description: Inspects cached Kerberos tickets, encryption types, PAC structures, and validity from .ccache or .kirbi files.
 
@@ -1910,6 +1997,10 @@ pub fn canonicalize_name(name: &str) -> &'static str {
         "getadusers" => "GetADUsers",
         "getadcomputers" => "GetADComputers",
         "getlapspassword" => "GetLAPSPassword",
+        "getgmsapassword" => "getGMSAPassword",
+        "get-gmsa-password" => "getGMSAPassword",
+        "gmsadumper" => "getGMSAPassword",
+        "gmsa" => "getGMSAPassword",
         "checkldapstatus" => "CheckLDAPStatus",
         "addcomputer" => "addcomputer",
         "dacledit" => "dacledit",
@@ -1919,6 +2010,9 @@ pub fn canonicalize_name(name: &str) -> &'static str {
         "ldapclient" => "ldapclient",
         "certipy" => "certipy",
         "adcs" => "certipy",
+        "whisker" => "whisker",
+        "shadowcred" => "whisker",
+        "shadow-credentials" => "whisker",
         "coerce" => "coerce",
         "dfsclient" => "dfsclient",
         "getarch" => "getArch",
@@ -1947,6 +2041,9 @@ pub fn canonicalize_name(name: &str) -> &'static str {
         "ntdsdump" => "ntdsdump",
         "esentutl" => "esentutl",
         "dpapi" => "dpapi",
+        "backupkey" => "backupkey",
+        "backupkeys" => "backupkey",
+        "bkrp" => "backupkey",
         "describeticket" => "describeTicket",
         "getpac" => "getPac",
         "rbcd" => "rbcd",
@@ -2000,14 +2097,14 @@ mod tests {
             "smbclient", "ntlmrelayx", "getTGT", "getST", "ticketConverter",
             "ticketer", "samrdump", "lookupsid", "rpcdump", "rpcmap",
             "netview", "reg", "services", "mssqlclient", "GetADUsers",
-            "GetADComputers", "GetLAPSPassword", "CheckLDAPStatus", "addcomputer",
+            "GetADComputers", "GetLAPSPassword", "getGMSAPassword", "CheckLDAPStatus", "addcomputer",
             "dacledit", "owneredit", "dnstool", "ldapsearch", "ldapclient",
-            "certipy", "coerce", "dfsclient", "getArch", "machine_role", "oxidquery", "samedit",
+            "certipy", "whisker", "coerce", "dfsclient", "getArch", "machine_role", "oxidquery", "samedit",
             "changepasswd", "Get-GPPPassword", "net", "wmiquery", "wmipersist",
             "wspsearch", "rdp_check", "registry-read", "tstool", "ping",
             "tracer", "sniffer", "mqtt_check", "klist", "attrib", "filetime",
             "mssqlinstance", "checkMSSQLStatus", "DumpNTLMInfo", "ntdsdump",
-            "esentutl", "dpapi", "describeTicket", "getPac", "rbcd",
+            "esentutl", "dpapi", "backupkey", "describeTicket", "getPac", "rbcd",
             "findDelegation", "trueTree", "raiseChild", "smbpasswd", "split",
             "atq", "eventlog", "compat-matrix", "parse-target", "ntlm-hash",
             "krb5-asreq", "smb-negotiate", "rpc-interfaces", "bench-ndr",

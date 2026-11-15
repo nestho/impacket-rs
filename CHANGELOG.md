@@ -21,7 +21,7 @@ This project follows **Semantic Versioning 2.0.0 (SemVer)** and the exact change
 
 ---
 
-## [Unreleased]
+## [v0.3.0] - 2026-11-15
 
 1. Next-Gen Coercion Suite & MSRPC Wire Clients (Phase 2)
 
@@ -87,6 +87,113 @@ This project follows **Semantic Versioning 2.0.0 (SemVer)** and the exact change
         * Added `certipy req <TARGET> -ca <CA_NAME> -template <TEMPLATE> [-upn <UPN>] [-dns <DNS>] [-out <FILE>]` for certificate enrollment via `[MS-ICPR]`.
         * Added `certipy find <TARGET> [-vulnerable] [-base <DN>]` for querying ADCS certificate templates over LDAP and detecting ESC vulnerabilities.
         * Added help text, alias resolution (`adcs`), and regression test suite.
+
+4. Active Directory Shadow Credentials Engine (`crates/impacket-ldap` & Phase 3)
+
+    * **`[MS-ADTS]` Section 2.2.18.2 `KEYCREDENTIALLINK_BLOB` Codec (`crates/impacket-ldap::keycredential`)**:
+        * Implemented pure-Rust binary codecs for `KEYCREDENTIALLINK_BLOB` with version 2.0 layout and sorted `KEYCREDENTIALLINK_ENTRY` structures.
+        * Implemented Windows CNG `BCRYPT_RSAKEY_BLOB` parser and builder (`BCRYPT_RSAPUBLIC_MAGIC` 0x31415352 "RSA1") for 2048-bit RSA public keys.
+        * Added automatic cryptographic entry generation: `KeyID` (SHA-256 of `KeyMaterial`), `KeyHash` (SHA-256 of subsequent entries), `KeyUsage` (`KEY_USAGE_NGC`), `KeySource` (`KEY_SOURCE_AD`), 16-byte `DeviceId` GUID, `CustomKeyInformation`, and Windows `FILETIME` timestamps.
+        * Implemented `DnBinary` codec for Active Directory `Object(DN-Binary)` syntax (`B:<hex_len>:<hex_string>:<target_dn>`).
+    * **LDAP Shadow Credential Operations (`crates/impacket-ldap::keycredential`)**:
+        * Added `read_shadow_credentials` querying `msDS-KeyCredentialLink` on Active Directory target objects.
+        * Added `add_shadow_credential` injecting new public keys via LDAP `ModifyOperation::Add`.
+        * Added `remove_shadow_credential` deleting targeted credentials by KeyID, DeviceID, or raw DN-Binary string.
+        * Added `clear_shadow_credentials` flushing all shadow credentials on an object via LDAP `ModifyOperation::Delete`.
+    * **`whisker` CLI Subcommand (`bins/impacket-rs`)**:
+        * Added `whisker <action> <TARGET> [options]` supporting `list`, `add`, `remove`, and `clear` actions.
+        * Added automatic `sAMAccountName` to `distinguishedName` directory resolution (`-target-user <SAM>` or direct `-target-dn <DN>`).
+        * Added key metadata exporting (`-key-out <FILE>`) for integration with PKINIT authentication tools (`getTGT`).
+        * Integrated into global help system with alias resolution (`shadowcred`, `shadow-credentials`) and regression test suite (77 total subcommands).
+
+5. Kerberos PKINIT Authentication & TGT Session Acquisition (Phase 3)
+
+    * **PKCS#12 (.pfx / .p12) Parser & Cryptographic Unwrapper (`crates/impacket-krb5::pkinit`)**:
+        * Implemented pure-Rust PKCS#12 container parser with ASN.1 DER decoding (`AuthenticatedSafe`, `SafeContents`, `SafeBag`).
+        * Implemented RFC 7292 Appendix B password-based key derivation (`pkcs12_kdf`) for 3DES and SHA-1.
+        * Added PBES2 decryption supporting PBKDF2 with HMAC-SHA256 / HMAC-SHA1 and AES-128-CBC / AES-256-CBC.
+        * Added PKCS#12 PBE decryption supporting 3DES-CBC (`pbeWithSHAAnd3-KeyTripleDES-CBC`).
+        * Added automated extraction of X.509 DER certificates and PKCS#1 / PKCS#8 RSA private keys from unencrypted and password-protected PFX containers.
+    * **RFC 4556 PKINIT Reply Key Derivation (`crates/impacket-krb5::pkinit`)**:
+        * Added `extract_pkinit_kdc_dh_public_and_nonce` parsing CMS `SignedData` and `KDCDHKeyInfo` inside `PA-PK-AS-REP` (PA-DATA 17).
+        * Implemented RFC 4556 Section 3.2.3.1 `octetstring2key` key derivation function over Diffie-Hellman Oakley Group 14 shared secrets bound to client and server nonces.
+        * Added `derive_pkinit_reply_key` producing AES-256 (etype 18), AES-128 (etype 17), and RC4 (etype 23) AS-REP reply decryption keys.
+    * **TGT Session Decryption & Ticket Export (`crates/impacket-krb5`)**:
+        * Added `padata` extraction to `KdcAsResponse::AsRep` in `from_der_bytes`.
+        * Added `TgtSession::to_ccache` converting decrypted TGT session credentials into MIT Kerberos Credential Cache (`CCache` v4).
+    * **`getTGT` PKINIT & File Export (`bins/impacket-rs`)**:
+        * Extended `getTGT` CLI tool to support certificate authentication via `-cert <FILE> [-key <FILE>]` and PKCS#12 containers via `-pfx <FILE> [-pfx-pass <PASS>]`.
+        * Added `-out <FILE>` (or `-outputfile`) exporting decrypted TGT tickets to `.ccache` files.
+        * Added `-kirbi <FILE>` exporting tickets to Windows Mimikatz `.kirbi` (KRB-CRED App 22) format.
+        * Updated help documentation and usage examples.
+
+6. Windows LAPS v2 Decryption & MS-GKDI Group Key Distribution (`crates/impacket-sam`, `crates/impacket-msrpc`, `crates/impacket-crypto` & Phase 3)
+
+    * **RFC 3394 AES Key Wrap & NIST SP 800-108 KDF (`crates/impacket-crypto`)**:
+        * Implemented pure-Rust RFC 3394 / NIST SP 800-38F Key Wrap (`aes_key_wrap`) and Key Unwrap (`aes_key_unwrap`) for 128-bit and 256-bit KEKs.
+        * Validated with official NIST SP 800-38F / RFC 3394 Section 4 test vectors.
+    * **`[MS-GKDI]` Group Key Distribution Protocol Client (`crates/impacket-msrpc::gkdi`)**:
+        * Implemented MSRPC client for `[MS-GKDI]` interface `b9785960-524f-11df-8b6d-83dcded72085` v1.0 over named pipe `\PIPE\protected_storage`.
+        * Implemented `GetKey` (Opnum 0) request builder with target security descriptor and root key GUID parameters.
+        * Added `GroupKeyEnvelope` (`KDSK` / `DSKB` magic) parser extracting hierarchical L0/L1/L2 indices, domain/forest metadata, and 64-byte L2 seed key material.
+    * **Windows LAPS v2 DPAPI-NG Decryption Engine (`crates/impacket-sam::laps`)**:
+        * Added `LapsEncryptedBlob::parse` supporting both raw CMS `ContentInfo` and full 16-byte Active Directory attribute envelopes (`FILETIME` timestamp, size, reserved).
+        * Implemented CMS `EnvelopedData` parser for `KEKRecipientInfo` [2] with 28-byte `KeyIdentifier` (16-byte `RootKeyID`, 4-byte `L0`, 4-byte `L1`, 4-byte `L2`).
+        * Implemented Key Encryption Key (KEK) derivation via NIST SP 800-108 counter mode KDF with label `"KDS service\0"`.
+        * Implemented Content Encryption Key (CEK) recovery via RFC 3394 AES Key Unwrap and payload decryption via AES-256-GCM.
+        * Added pure-Rust JSON payload parser extracting cleartext password, account name, and timestamp.
+    * **`GetLAPSPassword` CLI Upgrades (`bins/impacket-rs`)**:
+        * Enhanced `GetLAPSPassword` to query and process `msLAPS-EncryptedPassword` and `msLAPS-EncryptedPasswordHistory` alongside cleartext `msLAPS-Password` and legacy `ms-Mcs-AdmPwd`.
+        * Added automatic online decryption by connecting to Domain Controller over `[MS-GKDI]` (`\PIPE\protected_storage`) with caching per key generation.
+        * Added `-l2key <HEX>` option for offline decryption using operator-supplied 64-byte L2 seed keys.
+        * Added `-history` flag to discover and decrypt all historical password rotations.
+        * Updated command help documentation and usage examples.
+
+7. Active Directory Group Managed Service Accounts (gMSA) Engine (`crates/impacket-sam`, `crates/impacket-krb5` & Phase 3)
+
+    * **`[MS-ADTS]` Section 2.2.14 `MSDS-MANAGEDPASSWORD_BLOB` Codec (`crates/impacket-sam::gmsa`)**:
+        * Implemented pure-Rust binary decoder and encoder for `MSDS-MANAGEDPASSWORD_BLOB` from Active Directory constructed attribute `msDS-ManagedPassword`.
+        * Extracts current cleartext Unicode password, previous cleartext password (if retained), and computes respective NT hashes.
+        * Extracts and formats `QueryPasswordInterval` and `UnchangedPasswordInterval` 64-bit 100ns tick rotation schedules.
+        * Implemented bidirectional serialization (`ManagedPasswordBlob::to_bytes`) and comprehensive unit tests.
+    * **`getGMSAPassword` CLI Tool & Kerberos Key Derivation (`bins/impacket-rs`)**:
+        * Added `getGMSAPassword <TARGET> [options]` CLI subcommand with aliases `gmsadumper` and `gmsa`.
+        * Supports live LDAP queries for `(objectClass=msDS-GroupManagedServiceAccount)` targets with optional `-account <NAME>` filter.
+        * Implemented offline inspection mode via `-raw <HEX>` to decode raw blobs without network access.
+        * Computes Kerberos AES-256 and AES-128 keys from extracted passwords and domain/account salts (`DOMAINsAMAccountName`).
+        * Implemented automatic fallback parsing of `msDS-GroupMSAMembership` SecurityDescriptor DACL to list authorized principal SIDs upon access denial.
+        * Integrated into global help system with parameter validation and automated help coverage tests.
+
+8. `[MS-BKRP]` BackupKey Remote Protocol Client & `backupkey` CLI Tool (`crates/impacket-msrpc`, `crates/impacket-sam` & Phase 3)
+
+    * **`[MS-BKRP]` BackupKey Wire Protocol Client (`crates/impacket-msrpc::bkrp`)**:
+        * Implemented pure-Rust MSRPC client `BkrpClient<T: RpcTransport>` on interface `3dde7c30-165d-11d1-ab8f-00805f14db40` v1.0 over named pipe `\PIPE\protected_storage`.
+        * Implemented `BackuprKey` (Opnum 0) request stub builder and response parser.
+        * Added protocol action GUID constants:
+            * `BACKUPKEY_RETRIEVE_BACKUP_KEY_GUID`: `{018ff48a-eaba-40c6-8f6d-72370240e967}` (retrieves domain 2048-bit RSA public key certificate).
+            * `BACKUPKEY_RESTORE_GUID`: `{47270c64-2fc7-499b-ac5b-0e37cdce899a}` (requests DC to unwrap DPAPI MasterKey).
+            * `BACKUPKEY_BACKUP_GUID`: `{7f752b10-178e-11d1-ab8f-00805f14db40}` (server-side wrap).
+            * `BACKUPKEY_RESTORE_GUID_WIN2K`: `{7fe94d50-178e-11d1-ab8f-00805f14db40}` (legacy Win2k unwrap).
+        * Added `retrieve_backup_key` extracting DER-encoded X.509 certificate.
+        * Added `restore_master_key` sending wrapped master key bytes and unwrapping cleartext 64-byte DPAPI MasterKey.
+    * **`backupkey` & `dpapi` CLI Workflows (`bins/impacket-rs`)**:
+        * Added standalone `backupkey <TARGET> [options]` CLI subcommand with aliases `backupkeys` and `bkrp`.
+        * Added `-export <PREFIX>` exporting retrieved domain backup key certificates to DER (`<PREFIX>.der`) and PEM (`<PREFIX>.crt`).
+        * Added `-restore <FILE>` loading `MasterKeyFile`, extracting `domain_key_bytes`, and unwrapping 64-byte MasterKey via DC.
+        * Enhanced `dpapi` command supporting `dpapi backupkeys <TARGET>` and `dpapi unprotect <MASTERKEY_FILE> <TARGET>`.
+        * Integrated into global help registry with automated help flag verification tests.
+
+9. Kerberoasting Suite Upgrades & AES-128/AES-256 Support (`GetUserSPNs` & `bins/impacket-rs`)
+
+    * **Kerberos Encryption Type Negotiation (`GetUserSPNs`)**:
+        * Added `-aes` flag to request modern AES-256 (`etype 18`) and AES-128 (`etype 17`) Kerberoast service tickets for domains with RC4 disabled.
+        * Added `-etype <rc4|aes128|aes256|aes|all>` option allowing precise selection of requested ticket cipher suites.
+        * Formats output for Hashcat mode 13100 (`$krb5tgs$23$`), mode 19600 (`$krb5tgs$17$`), and mode 19700 (`$krb5tgs$18$`).
+    * **Target Filtering & File Export (`GetUserSPNs`)**:
+        * Added `-user <NAME>` and `-request-user <NAME>` to filter discovered SPN accounts and request tickets for a specific user.
+        * Added `-outputfile <FILE>` (or `-o <FILE>`) writing/appending captured Hashcat tickets directly into an output file for offline cracking pipelines.
+        * Added comprehensive unit test coverage for argument parsing, encryption type selection, and error handling.
+        * Updated command help documentation and usage examples.
 
 ---
 

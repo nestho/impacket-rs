@@ -13,6 +13,7 @@
 //!
 //! Low-level NDR pointer/string helpers shared by the modules live in [`dtypes`].
 
+pub mod bkrp;
 pub mod dtypes;
 pub mod dfsnm;
 pub mod drsr;
@@ -20,6 +21,7 @@ pub mod efsr;
 pub mod even6;
 pub mod exec;
 pub mod fsrvp;
+pub mod gkdi;
 pub mod lsat;
 pub mod mgmt;
 pub mod rprn;
@@ -31,6 +33,11 @@ pub mod transport;
 pub mod tsch;
 pub mod wkst;
 
+pub use bkrp::{
+    BkrpClient, BACKUPKEY_BACKUP_GUID, BACKUPKEY_RESTORE_GUID, BACKUPKEY_RESTORE_GUID_WIN2K,
+    BACKUPKEY_RETRIEVE_BACKUP_KEY_GUID, BKRP_INTERFACE_UUID, BKRP_PIPE, BKRP_VERSION_MAJOR,
+    BKRP_VERSION_MINOR,
+};
 pub use dfsnm::{
     namespace_flavor, storage_state, volume_state, DfsClient, DfsInfo1, DfsInfo2, DfsInfo3,
     DfsInfo300, DfsStorageInfo, DFSNM_INTERFACE_UUID, DFSNM_PIPE, DFSNM_VERSION_MAJOR,
@@ -44,6 +51,10 @@ pub use even6::{Even6Client, EvtEventRecord, EVEN6_INTERFACE_UUID, EVEN6_NAMED_P
 pub use exec::{atexec, dcomexec, psexec, smbexec, wmiexec, DcomObject};
 pub use fsrvp::{
     FsrvpClient, FSRVP_INTERFACE_UUID, FSRVP_PIPE, FSRVP_VERSION_MAJOR, FSRVP_VERSION_MINOR,
+};
+pub use gkdi::{
+    GkdiClient, GroupKeyEnvelope, GKDI_INTERFACE_UUID, GKDI_PIPE, GKDI_VERSION_MAJOR,
+    GKDI_VERSION_MINOR,
 };
 pub use lsat::{LsatClient, SidNameUse, TranslatedName};
 pub use mgmt::{
