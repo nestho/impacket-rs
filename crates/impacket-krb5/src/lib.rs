@@ -40,7 +40,10 @@ pub use pac::{
 
 pub use ccache::CCache;
 pub use crypto::{string_to_key_aes128, string_to_key_aes256};
-pub use pkinit::{build_pa_pk_as_req, PkinitCredentials, PkinitDhState};
+pub use pkinit::{
+    build_pa_pk_as_req, derive_pkinit_reply_key, extract_pkinit_kdc_dh_public_and_nonce,
+    parse_pkcs12, PkinitCredentials, PkinitDhState, PA_PK_AS_REP, PA_PK_AS_REQ,
+};
 
 pub use tgs::{
     decrypt_u2u_ticket_enc_part, extract_session_key_from_as_rep, get_tgs_live, get_tgs_over_stream,
@@ -412,6 +415,7 @@ pub enum KdcAsResponse {
         ticket: Vec<u8>,
         enc_part_etype: i32,
         enc_part_cipher: Vec<u8>,
+        padata: Vec<(i64, Vec<u8>)>,
     },
 }
 
@@ -519,11 +523,53 @@ impl KdcAsResponse {
             let mut ticket = Vec::new();
             let mut enc_part_etype = 23i32;
             let mut enc_part_cipher = Vec::new();
+            let mut padata = Vec::new();
 
             while !seq_body.is_empty() {
                 let (ctx_tag, ctx_val, rest) = der::decode_tlv(seq_body)?;
                 seq_body = rest;
                 match ctx_tag & 0x1F {
+                    2 => {
+                        // padata [2] METHOD-DATA (SEQUENCE OF PA-DATA)
+                        if let Ok((_, mut pa_seq, _)) = der::decode_tlv(ctx_val) {
+                            while !pa_seq.is_empty() {
+                                if let Ok((_, pa_val, pa_rest)) = der::decode_tlv(pa_seq) {
+                                    pa_seq = pa_rest;
+                                    let mut p_type = 0i64;
+                                    let mut p_data = Vec::new();
+                                    if let Ok((_, mut inner, _)) = der::decode_tlv(pa_val) {
+                                        while !inner.is_empty() {
+                                            if let Ok((itag, ival, irest)) = der::decode_tlv(inner) {
+                                                inner = irest;
+                                                match itag & 0x1F {
+                                                    1 => {
+                                                        if let Ok(num) = der::decode_integer(ival) {
+                                                            p_type = num;
+                                                        }
+                                                    }
+                                                    2 => {
+                                                        if let Ok((_, octets, _)) = der::decode_tlv(ival) {
+                                                            p_data = octets.to_vec();
+                                                        } else {
+                                                            p_data = ival.to_vec();
+                                                        }
+                                                    }
+                                                    _ => {}
+                                                }
+                                            } else {
+                                                break;
+                                            }
+                                        }
+                                        if p_type != 0 || !p_data.is_empty() {
+                                            padata.push((p_type, p_data));
+                                        }
+                                    }
+                                } else {
+                                    break;
+                                }
+                            }
+                        }
+                    }
                     3 => {
                         let (_, s_bytes, _) = der::decode_tlv(ctx_val)?;
                         realm = String::from_utf8_lossy(s_bytes).into_owned();
@@ -556,6 +602,7 @@ impl KdcAsResponse {
                 ticket,
                 enc_part_etype,
                 enc_part_cipher,
+                padata,
             })
         } else {
             Err(CoreError::ProtocolError(format!(
@@ -796,11 +843,44 @@ fn parse_enc_as_rep_part(
     })
 }
 
+impl TgtSession {
+    /// Converts this TGT session into an MIT Kerberos Credential Cache (`CCache` v4).
+    pub fn to_ccache(&self) -> ccache::CCache {
+        let client = ccache::Principal::new(&self.realm, &[&self.username]);
+        let server = ccache::Principal::new(&self.realm, &["krbtgt", &self.realm]);
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs() as u32)
+            .unwrap_or(0);
+        let cred = ccache::Credential {
+            client: client.clone(),
+            server,
+            key: ccache::KeyBlock {
+                keytype: self.session_key_etype as u16,
+                keyvalue: self.session_key_bytes.clone(),
+            },
+            times: ccache::Times {
+                authtime: now,
+                starttime: now,
+                endtime: now + 36000,
+                renew_till: now + 604800,
+            },
+            is_skey: 0,
+            ticket_flags: 0x40e00000,
+            ticket: self.tgt_ticket.clone(),
+            second_ticket: Vec::new(),
+        };
+        let mut cc = ccache::CCache::new(client);
+        cc.credentials.push(cred);
+        cc
+    }
+}
+
 impl KdcAsResponse {
     /// Decrypts the AS-REP `enc-part` using the user's RC4 NT hash and extracts the TGT session key and ticket.
     pub fn decrypt_tgt_session(&self, nt_hash: &[u8; 16]) -> Result<TgtSession, CoreError> {
         match self {
-            Self::AsRep { realm, username, ticket, enc_part_etype, enc_part_cipher } => {
+            Self::AsRep { realm, username, ticket, enc_part_etype, enc_part_cipher, .. } => {
                 if *enc_part_etype != 23 {
                     return Err(CoreError::ProtocolError(format!("Unsupported AS-REP enc-part etype: {}", enc_part_etype)));
                 }
@@ -816,7 +896,7 @@ impl KdcAsResponse {
     /// Decrypts the AS-REP `enc-part` using the user's AES-256 key and extracts the TGT session key and ticket.
     pub fn decrypt_tgt_session_aes256(&self, key: &[u8; 32]) -> Result<TgtSession, CoreError> {
         match self {
-            Self::AsRep { realm, username, ticket, enc_part_etype, enc_part_cipher } => {
+            Self::AsRep { realm, username, ticket, enc_part_etype, enc_part_cipher, .. } => {
                 if *enc_part_etype != 18 {
                     return Err(CoreError::ProtocolError(format!("Expected AES-256 AS-REP enc-part (etype 18), got {}", enc_part_etype)));
                 }
@@ -832,7 +912,7 @@ impl KdcAsResponse {
     /// Decrypts the AS-REP `enc-part` using the user's AES-128 key and extracts the TGT session key and ticket.
     pub fn decrypt_tgt_session_aes128(&self, key: &[u8; 16]) -> Result<TgtSession, CoreError> {
         match self {
-            Self::AsRep { realm, username, ticket, enc_part_etype, enc_part_cipher } => {
+            Self::AsRep { realm, username, ticket, enc_part_etype, enc_part_cipher, .. } => {
                 if *enc_part_etype != 17 {
                     return Err(CoreError::ProtocolError(format!("Expected AES-128 AS-REP enc-part (etype 17), got {}", enc_part_etype)));
                 }

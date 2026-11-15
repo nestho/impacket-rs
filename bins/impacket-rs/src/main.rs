@@ -28,7 +28,7 @@ use impacket_krb5::{
     get_np_users_live, get_tgs_live, get_tgt_live, parse_ticket_enc_part, send_as_req_live,
     send_fast_armored_as_req_live, string_to_key_aes256, FastArmorConfig, KdcAsResponse,
     KerberosEType, KpasswdResultCode, Krb5AsReq, Krb5TgsReq, Pac, PacLogonInfo, PkinitCredentials,
-    PkinitDhState, CKSUMTYPE_CRC32, CKSUMTYPE_HMAC_MD5, CKSUMTYPE_HMAC_SHA1_96_AES128,
+    PkinitDhState, derive_pkinit_reply_key, TgtSession, CKSUMTYPE_CRC32, CKSUMTYPE_HMAC_MD5, CKSUMTYPE_HMAC_SHA1_96_AES128,
     CKSUMTYPE_HMAC_SHA1_96_AES256, CKSUMTYPE_RSA_MD5, PAC_PRIVSVR_CHECKSUM, PAC_SERVER_CHECKSUM,
 };
 use impacket_ldap::{
@@ -5379,6 +5379,11 @@ fn cmd_get_tgt(args: &[String]) {
         println!("  -aesKey <HEX>        Kerberos AES key (128 or 256 bits)");
         println!("  -cert <FILE>         X.509 certificate file (PEM/DER) for PKINIT");
         println!("  -key <FILE>          RSA private key file (PEM/DER) for PKINIT");
+        println!("  -pfx <FILE>          PKCS#12 certificate container (.pfx/.p12) for PKINIT");
+        println!("  -pfx-pass <PASS>     Password for PKCS#12 container");
+        println!("  -out <FILE>          Output ccache file (default: <USER>.ccache)");
+        println!("  -kirbi <FILE>        Output Windows Mimikatz .kirbi file");
+        println!("  -save                Save TGT to default ccache file");
         println!("  -fast <FILE>         FAST armor ticket file (.ccache or .kirbi, RFC 6113)");
         println!("  -dc-ip <IP>          Domain Controller IP (overrides target)");
         println!("  -port <PORT>         KDC port (default 88)");
@@ -5395,6 +5400,10 @@ fn cmd_get_tgt(args: &[String]) {
     let mut aes_key_hex: Option<String> = None;
     let mut cert_file: Option<String> = None;
     let mut key_file: Option<String> = None;
+    let mut pfx_file: Option<String> = None;
+    let mut pfx_pass: Option<String> = None;
+    let mut out_file: Option<String> = None;
+    let mut kirbi_file: Option<String> = None;
     let mut fast_file: Option<String> = None;
     let mut dc_ip: Option<String> = None;
     let mut port: u16 = 88;
@@ -5413,6 +5422,25 @@ fn cmd_get_tgt(args: &[String]) {
             "-key" if i + 1 < args.len() => {
                 key_file = Some(args[i + 1].clone());
                 i += 2;
+            }
+            "-pfx" if i + 1 < args.len() => {
+                pfx_file = Some(args[i + 1].clone());
+                i += 2;
+            }
+            "-pfx-pass" if i + 1 < args.len() => {
+                pfx_pass = Some(args[i + 1].clone());
+                i += 2;
+            }
+            "-out" | "-outputfile" if i + 1 < args.len() => {
+                out_file = Some(args[i + 1].clone());
+                i += 2;
+            }
+            "-kirbi" if i + 1 < args.len() => {
+                kirbi_file = Some(args[i + 1].clone());
+                i += 2;
+            }
+            "-save" => {
+                i += 1;
             }
             "-fast" if i + 1 < args.len() => {
                 fast_file = Some(args[i + 1].clone());
@@ -5438,18 +5466,53 @@ fn cmd_get_tgt(args: &[String]) {
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0);
 
+    let mut pkinit_dh_state: Option<PkinitDhState> = None;
+
     let req_result = (|| -> Result<Krb5AsReq, CoreError> {
-        if let (Some(cpath), Some(kpath)) = (&cert_file, &key_file) {
+        if let Some(ppath) = &pfx_file {
+            let pfx_bytes = std::fs::read(ppath).map_err(|e| {
+                CoreError::ProtocolError(format!("Failed reading PKCS#12 file '{}': {}", ppath, e))
+            })?;
+            let pass = pfx_pass.as_deref().unwrap_or("");
+            let cred = PkinitCredentials::from_pfx(&pfx_bytes, pass)?;
+            let nanos = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0);
+            let mut seed_mat = Vec::new();
+            seed_mat.extend_from_slice(&nanos.to_le_bytes());
+            seed_mat.extend_from_slice(spec.username.as_bytes());
+            seed_mat.extend_from_slice(spec.domain.as_bytes());
+            let seed = impacket_crypto::sha256(&seed_mat);
+            let dh = PkinitDhState::new_group14(&seed)?;
+            let req = Krb5AsReq::with_pkinit_preauth(&spec.domain, &spec.username, &cred, &dh, now)?;
+            pkinit_dh_state = Some(dh);
+            Ok(req)
+        } else if let Some(cpath) = &cert_file {
             let cert_bytes = std::fs::read(cpath).map_err(|e| {
                 CoreError::ProtocolError(format!("Failed reading certificate '{}': {}", cpath, e))
             })?;
-            let key_bytes = std::fs::read(kpath).map_err(|e| {
-                CoreError::ProtocolError(format!("Failed reading private key '{}': {}", kpath, e))
-            })?;
+            let key_bytes = if let Some(kpath) = &key_file {
+                std::fs::read(kpath).map_err(|e| {
+                    CoreError::ProtocolError(format!("Failed reading private key '{}': {}", kpath, e))
+                })?
+            } else {
+                cert_bytes.clone()
+            };
             let cred = PkinitCredentials::from_pem_or_der(&cert_bytes, &key_bytes)?;
-            let seed = [0x5Au8; 32];
+            let nanos = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0);
+            let mut seed_mat = Vec::new();
+            seed_mat.extend_from_slice(&nanos.to_le_bytes());
+            seed_mat.extend_from_slice(spec.username.as_bytes());
+            seed_mat.extend_from_slice(spec.domain.as_bytes());
+            let seed = impacket_crypto::sha256(&seed_mat);
             let dh = PkinitDhState::new_group14(&seed)?;
-            Krb5AsReq::with_pkinit_preauth(&spec.domain, &spec.username, &cred, &dh, now)
+            let req = Krb5AsReq::with_pkinit_preauth(&spec.domain, &spec.username, &cred, &dh, now)?;
+            pkinit_dh_state = Some(dh);
+            Ok(req)
         } else if let Some(hex_str) = &aes_key_hex {
             let bytes = impacket_core::decode_hex(hex_str).map_err(|e| {
                 CoreError::ProtocolError(format!("Invalid AES key hex: {}", e))
@@ -5472,7 +5535,7 @@ fn cmd_get_tgt(args: &[String]) {
             let aes_key = string_to_key_aes256(p.expose_secret(), &salt, 4096);
             Krb5AsReq::with_aes256_preauth(&spec.domain, &spec.username, &aes_key, now)
         } else {
-            Err(CoreError::ProtocolError("getTGT needs a password, -hashes :NT, -aesKey <HEX>, or -cert/-key (PKINIT)".into()))
+            Err(CoreError::ProtocolError("getTGT needs a password, -hashes :NT, -aesKey <HEX>, -cert/-key, or -pfx (PKINIT)".into()))
         }
     })();
 
@@ -5484,7 +5547,7 @@ fn cmd_get_tgt(args: &[String]) {
         }
     };
 
-    if let Some(ffile) = &fast_file {
+    let as_rep_resp = if let Some(ffile) = &fast_file {
         let fbytes = match std::fs::read(ffile) {
             Ok(b) => b,
             Err(e) => {
@@ -5508,11 +5571,7 @@ fn cmd_get_tgt(args: &[String]) {
             armor_config.armor_client_name, armor_config.armor_realm, armor_config.armor_etype
         );
         match send_fast_armored_as_req_live(kdc_host, port, &armor_config, &req, None, DEFAULT_TIMEOUT) {
-            Ok((KdcAsResponse::AsRep { realm, username, enc_part_etype, .. }, maybe_fast_rep)) => {
-                println!(
-                    "[+] FAST-Armored TGT obtained for {}@{} (AS-REP enc-part etype {})",
-                    username, realm, enc_part_etype
-                );
+            Ok((as_resp, maybe_fast_rep)) => {
                 if let Some(fast_rep) = maybe_fast_rep {
                     println!(
                         "[*] Decrypted inner EncKrbFastRep (nonce: {:#x}, padata count: {})",
@@ -5520,31 +5579,127 @@ fn cmd_get_tgt(args: &[String]) {
                         fast_rep.padata.len()
                     );
                 }
-            }
-            Ok((KdcAsResponse::Error { error_code, .. }, _)) => {
-                println!("[-] {}@{}: {}", spec.username, spec.domain, error_code.name());
+                as_resp
             }
             Err(e) => {
                 eprintln!("[-] getTGT FAST error: {}", e);
                 std::process::exit(1);
             }
         }
-        return;
-    }
+    } else {
+        match send_as_req_live(kdc_host, port, &req, DEFAULT_TIMEOUT) {
+            Ok(r) => r,
+            Err(e) => {
+                eprintln!("[-] getTGT error: {}", e);
+                std::process::exit(1);
+            }
+        }
+    };
 
-    match send_as_req_live(kdc_host, port, &req, DEFAULT_TIMEOUT) {
-        Ok(KdcAsResponse::AsRep { realm, username, enc_part_etype, .. }) => {
+    match as_rep_resp {
+        KdcAsResponse::AsRep { realm, username, ticket, enc_part_etype, enc_part_cipher, padata } => {
             println!(
                 "[+] TGT obtained for {}@{} (AS-REP enc-part etype {})",
                 username, realm, enc_part_etype
             );
+
+            let resp_obj = KdcAsResponse::AsRep {
+                realm: realm.clone(),
+                username: username.clone(),
+                ticket: ticket.clone(),
+                enc_part_etype,
+                enc_part_cipher: enc_part_cipher.clone(),
+                padata: padata.clone(),
+            };
+
+            let tgt_res: Result<TgtSession, CoreError> = (|| -> Result<TgtSession, CoreError> {
+                if let Some(dh) = &pkinit_dh_state {
+                    let pk_rep = padata.iter().find(|(t, _)| *t == 17);
+                    if let Some((_, rep_data)) = pk_rep {
+                        let reply_key = derive_pkinit_reply_key(rep_data, dh, enc_part_etype)?;
+                        println!("[*] Derived PKINIT reply key ({} bytes) via Oakley Group 14 DH", reply_key.len());
+                        if enc_part_etype == 18 {
+                            let mut k = [0u8; 32];
+                            k.copy_from_slice(&reply_key[..32]);
+                            resp_obj.decrypt_tgt_session_aes256(&k)
+                        } else if enc_part_etype == 17 {
+                            let mut k = [0u8; 16];
+                            k.copy_from_slice(&reply_key[..16]);
+                            resp_obj.decrypt_tgt_session_aes128(&k)
+                        } else if enc_part_etype == 23 {
+                            let mut k = [0u8; 16];
+                            k.copy_from_slice(&reply_key[..16]);
+                            resp_obj.decrypt_tgt_session(&k)
+                        } else {
+                            Err(CoreError::ProtocolError(format!("Unsupported AS-REP enc-part etype: {}", enc_part_etype)))
+                        }
+                    } else {
+                        Err(CoreError::ProtocolError("KDC did not return PA-PK-AS-REP in response".into()))
+                    }
+                } else if let Some(hex_str) = &aes_key_hex {
+                    let bytes = impacket_core::decode_hex(hex_str).map_err(|e| {
+                        CoreError::ProtocolError(format!("Invalid AES key hex: {}", e))
+                    })?;
+                    if bytes.len() == 32 {
+                        let mut k = [0u8; 32];
+                        k.copy_from_slice(&bytes);
+                        resp_obj.decrypt_tgt_session_aes256(&k)
+                    } else if bytes.len() == 16 {
+                        let mut k = [0u8; 16];
+                        k.copy_from_slice(&bytes);
+                        resp_obj.decrypt_tgt_session_aes128(&k)
+                    } else {
+                        Err(CoreError::ProtocolError("Invalid AES key length".into()))
+                    }
+                } else if let Some(h) = &spec.hashes {
+                    resp_obj.decrypt_tgt_session(&h.nt)
+                } else if let Some(p) = &spec.password {
+                    let salt = format!("{}{}", spec.domain.to_uppercase(), spec.username);
+                    let aes_key = string_to_key_aes256(p.expose_secret(), &salt, 4096);
+                    resp_obj.decrypt_tgt_session_aes256(&aes_key)
+                } else {
+                    Err(CoreError::ProtocolError("No key material available to decrypt AS-REP".into()))
+                }
+            })();
+
+            match tgt_res {
+                Ok(tgt) => {
+                    let ccache = tgt.to_ccache();
+                    println!(
+                        "[*] TGT Session Key: {} (etype {})",
+                        impacket_core::encode_hex(&tgt.session_key_bytes),
+                        tgt.session_key_etype
+                    );
+
+                    let default_path = format!("{}.ccache", spec.username);
+                    let final_ccache_path = out_file.as_deref().unwrap_or(&default_path);
+
+                    if let Err(e) = std::fs::write(final_ccache_path, ccache.to_bytes()) {
+                        eprintln!("[-] Failed writing ccache to '{}': {}", final_ccache_path, e);
+                    } else {
+                        println!("[+] Saved TGT to CCache file '{}'", final_ccache_path);
+                    }
+
+                    if let Some(kpath) = &kirbi_file {
+                        match ccache.to_kirbi() {
+                            Ok(kbytes) => {
+                                if let Err(e) = std::fs::write(kpath, kbytes) {
+                                    eprintln!("[-] Failed writing kirbi to '{}': {}", kpath, e);
+                                } else {
+                                    println!("[+] Saved TGT to Kirbi file '{}'", kpath);
+                                }
+                            }
+                            Err(e) => eprintln!("[-] Failed generating kirbi ticket: {}", e),
+                        }
+                    }
+                }
+                Err(e) => {
+                    println!("[*] Raw AS-REP received, but decryption skipped or failed: {}", e);
+                }
+            }
         }
-        Ok(KdcAsResponse::Error { error_code, .. }) => {
+        KdcAsResponse::Error { error_code, .. } => {
             println!("[-] {}@{}: {}", spec.username, spec.domain, error_code.name());
-        }
-        Err(e) => {
-            eprintln!("[-] getTGT error: {}", e);
-            std::process::exit(1);
         }
     }
 }

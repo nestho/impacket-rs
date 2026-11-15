@@ -792,7 +792,7 @@ examples:
   export KRB5CCNAME=/tmp/websvc.ccache
 impacket-rs getST corp.local/websvc$ -k -no-pass -spn cifs/fs01.corp.local -impersonate Administrator -dc-ip 192.168.1.10
 "#),
-        "getTGT" => Some(r#"Description: Requests a Kerberos Ticket Granting Ticket (TGT) via AS-REQ using password, NTLM hash, or AES key pre-authentication, saving it to a .ccache file.
+        "getTGT" => Some(r#"Description: Requests a Kerberos Ticket Granting Ticket (TGT) via AS-REQ using password, NTLM hash, AES key, or PKINIT certificate/PFX pre-authentication, saving it to a .ccache or .kirbi file.
 
 usage: impacket-rs getTGT [options] <target>
 
@@ -801,23 +801,27 @@ positional arguments:
 
 options:
   -h, --help            show this help message and exit
-  -dc-ip <IP>            IP Address of the Domain Controller / KDC
-  -outputfile <FILE>     Base name for the output ccache file (default: username.ccache)
+  -dc-ip <IP>           IP Address of the Domain Controller / KDC
+  -port <PORT>          KDC port (default: 88)
+  -out, -outputfile <FILE>
+                        Output CCache ticket file (default: <USER>.ccache)
+  -kirbi <FILE>         Output Windows Mimikatz .kirbi ticket file
+  -save                 Save TGT to default CCache file
 
 authentication:
-  -hashes LMHASH:NTHASH
-                        NTLM hashes, format is LMHASH:NTHASH
-  -no-pass              don't ask for password (useful for -k)
-  -k                    Use Kerberos authentication. Grabs credentials from
-                        ccache file (KRB5CCNAME)
-  -aesKey hex key       AES key to use for Kerberos Authentication (128 or 256 bits)
-  -dc-ip ip address     IP Address of the domain controller
-  -target-ip ip address IP Address of the target machine
-  -port port            Destination port to connect to
+  -hashes LM:NT         NTLM pass-the-hash authentication (:NT)
+  -aesKey <HEX>         AES key to use for Kerberos Authentication (128 or 256 bits)
+  -cert <FILE>          X.509 certificate file (PEM/DER) for PKINIT
+  -key <FILE>           RSA private key file (PEM/DER) for PKINIT
+  -pfx <FILE>           PKCS#12 certificate container (.pfx/.p12) for PKINIT
+  -pfx-pass <PASSWORD>  Password for PKCS#12 container
+  -fast <FILE>          FAST armor ticket file (.ccache or .kirbi, RFC 6113)
 
 examples:
   impacket-rs getTGT corp.local/jdoe:Password123! -dc-ip 192.168.1.10
   impacket-rs getTGT corp.local/admin -hashes :aad3b435b51404eeaad3b435b51404ee -dc-ip 192.168.1.10
+  impacket-rs getTGT corp.local/admin -pfx admin.pfx -pfx-pass Secret123! -dc-ip 192.168.1.10 -out admin.ccache
+  impacket-rs getTGT corp.local/admin -cert admin.crt -key admin.key -dc-ip 192.168.1.10 -kirbi admin.kirbi
 "#),
         "klist" => Some(r#"Description: Inspects cached Kerberos tickets, encryption types, PAC structures, and validity from .ccache or .kirbi files.
 

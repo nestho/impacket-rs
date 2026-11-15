@@ -106,6 +106,27 @@ This project follows **Semantic Versioning 2.0.0 (SemVer)** and the exact change
         * Added key metadata exporting (`-key-out <FILE>`) for integration with PKINIT authentication tools (`getTGT`).
         * Integrated into global help system with alias resolution (`shadowcred`, `shadow-credentials`) and regression test suite (77 total subcommands).
 
+5. Kerberos PKINIT Authentication & TGT Session Acquisition (Phase 3)
+
+    * **PKCS#12 (.pfx / .p12) Parser & Cryptographic Unwrapper (`crates/impacket-krb5::pkinit`)**:
+        * Implemented pure-Rust PKCS#12 container parser with ASN.1 DER decoding (`AuthenticatedSafe`, `SafeContents`, `SafeBag`).
+        * Implemented RFC 7292 Appendix B password-based key derivation (`pkcs12_kdf`) for 3DES and SHA-1.
+        * Added PBES2 decryption supporting PBKDF2 with HMAC-SHA256 / HMAC-SHA1 and AES-128-CBC / AES-256-CBC.
+        * Added PKCS#12 PBE decryption supporting 3DES-CBC (`pbeWithSHAAnd3-KeyTripleDES-CBC`).
+        * Added automated extraction of X.509 DER certificates and PKCS#1 / PKCS#8 RSA private keys from unencrypted and password-protected PFX containers.
+    * **RFC 4556 PKINIT Reply Key Derivation (`crates/impacket-krb5::pkinit`)**:
+        * Added `extract_pkinit_kdc_dh_public_and_nonce` parsing CMS `SignedData` and `KDCDHKeyInfo` inside `PA-PK-AS-REP` (PA-DATA 17).
+        * Implemented RFC 4556 Section 3.2.3.1 `octetstring2key` key derivation function over Diffie-Hellman Oakley Group 14 shared secrets bound to client and server nonces.
+        * Added `derive_pkinit_reply_key` producing AES-256 (etype 18), AES-128 (etype 17), and RC4 (etype 23) AS-REP reply decryption keys.
+    * **TGT Session Decryption & Ticket Export (`crates/impacket-krb5`)**:
+        * Added `padata` extraction to `KdcAsResponse::AsRep` in `from_der_bytes`.
+        * Added `TgtSession::to_ccache` converting decrypted TGT session credentials into MIT Kerberos Credential Cache (`CCache` v4).
+    * **`getTGT` PKINIT & File Export (`bins/impacket-rs`)**:
+        * Extended `getTGT` CLI tool to support certificate authentication via `-cert <FILE> [-key <FILE>]` and PKCS#12 containers via `-pfx <FILE> [-pfx-pass <PASS>]`.
+        * Added `-out <FILE>` (or `-outputfile`) exporting decrypted TGT tickets to `.ccache` files.
+        * Added `-kirbi <FILE>` exporting tickets to Windows Mimikatz `.kirbi` (KRB-CRED App 22) format.
+        * Updated help documentation and usage examples.
+
 ---
 
 ## [v0.2.1] - 2026-11-13
