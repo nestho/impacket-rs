@@ -175,6 +175,15 @@ pub const WELL_KNOWN_INTERFACES: &[MsrpcInterfaceInfo] = &[
         description: "DFS Namespace Management Protocol",
     },
     MsrpcInterfaceInfo {
+        short_name: "MS-FSRVP (File Server Remote VSS)",
+        provider_binary: "vssvc.exe",
+        uuid: RpcUuid::new(0xa8e0_653c, 0x2744, 0x4389, [0xa6, 0x1d, 0x73, 0x73, 0xdf, 0x8b, 0x22, 0x92]),
+        version_major: 1,
+        version_minor: 0,
+        named_pipe: r"\PIPE\fssagentrpc",
+        description: "File Server Remote VSS Protocol (FSRVP)",
+    },
+    MsrpcInterfaceInfo {
         short_name: "MS-EVEN (Event Log)",
         provider_binary: "eventlog.dll",
         uuid: RpcUuid::new(0x8227_3fdc, 0xe32a, 0x18c3, [0x3f, 0x78, 0x82, 0x79, 0x29, 0xdc, 0x23, 0xea]),
