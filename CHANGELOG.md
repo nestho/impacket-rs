@@ -21,6 +21,12 @@ This project follows **Semantic Versioning 2.0.0 (SemVer)** and the exact change
 
 ---
 
+## [Unreleased]
+
+Active development for post-v0.4.1 roadmap.
+
+---
+
 ## [v0.4.1] - 2026-11-16
 
 1. Multi-Platform OS Packaging & Professional Distribution Suite
@@ -47,6 +53,19 @@ This project follows **Semantic Versioning 2.0.0 (SemVer)** and the exact change
         * Completely removed compiler target triple artifacts (no `unknown` in filenames).
         * Standardized uniform naming format across all 8 distribution assets: **`impacket-rs-v0.4.1-<os>-<arch>.<ext>`**.
         * Automated real-time SHA-256 cryptographic manifest generation (**`SHA256SUMS.txt`**).
+
+### SHA-256 Checksums
+
+```
+8f206120b72952a4f48100499920599e1b3b90df09a9c7e0a9f2407d10069c0c  impacket-rs-v0.4.1-linux-amd64.deb
+ff154361eb63fb8f0d768b8e568a8513c68479d6002209212833f3ea4d51f5a2  impacket-rs-v0.4.1-linux-amd64.rpm
+06b2cf8b13490d7578246f18247c5d1c31756aea47d6d361f64ee0c351ad0bb6  impacket-rs-v0.4.1-linux-arm64.deb
+cf5f1bd56f25c749b6fe57e82870ad03ce375b8c14cc4dfa24b6b6ee1aaf4676  impacket-rs-v0.4.1-linux-arm64.rpm
+e2ffd1d5db12c768c3b3bdce049aa2f97e76ed428e211e168ed02105eb41fbe7  impacket-rs-v0.4.1-macos-arm64.dmg
+3124e6a637f73eca90e26a74ccf6a1603b4e401ac436573c0694a748e37f51d3  impacket-rs-v0.4.1-macos-x86_64.dmg
+f5e5cd36565c21fb4e7a75ca08af7d692bf3780df5119026561465c908de6a49  impacket-rs-v0.4.1-windows-amd64.exe
+5d455b3803139ce8028c1dd58cdd9d89c9c81f980a9178611afc7f5db70ea81b  impacket-rs-v0.4.1-windows-arm64.exe
+```
 
 ---
 
