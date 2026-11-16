@@ -23,7 +23,19 @@ This project follows **Semantic Versioning 2.0.0 (SemVer)** and the exact change
 
 ## [Unreleased]
 
-1. RODC Kerberos Key List Attack Engine (`keylistattack` / `MS-KILE`)
+1. Remote DPAPI System & Credential Harvester (`dpapidump` & `crates/impacket-sam`)
+
+    * **DPAPI System & Credential Blob Parser (`crates/impacket-sam::dpapi`)**:
+        * Implemented `DpapiSystem` parsing LSA `DPAPI_SYSTEM` 44-byte structure into `machine_key` and `user_key` with SHA-1 validation.
+        * Implemented `CredentialFile` parsing Windows DPAPI credential files (`AppData\Local\Microsoft\Credentials` and `Roaming`).
+        * Implemented `CredentialBlob` parsing decrypted `CREDENTIAL_BLOB` structures extracting target name, user name, and plaintext credential data.
+        * Added `DpapiBlob::master_key_guid_str()` helper for formatted GUID directory and file lookups.
+    * **Remote Harvester CLI & Offline Decryption (`bins/impacket-rs`)**:
+        * Implemented `dpapidump` CLI tool connecting over SMB, pulling `DPAPI_SYSTEM` secret via MS-RRP/LSA secrets or `-key`, traversing user and system credential directories, resolving master key files from `\Windows\System32\Microsoft\Protect\S-1-5-18\User\<guid>`, decrypting master keys, and dumping plaintext target credentials.
+        * Extended `dpapi` CLI tool with `credential` / `cred` offline mode to decrypt saved credential files using `-masterkey` or `-key`.
+        * Added shell auto-completions and help reference for `dpapidump`.
+
+2. RODC Kerberos Key List Attack Engine (`keylistattack` / `MS-KILE`)
 
     * **RODC Credential Extraction Engine (`crates/impacket-krb5::keylist`)**:
         * Implemented MS-KILE Section 3.3.5.6.4 and issue #1667 partial TGT forging with embedded `PAC_LOGON_INFO`, `PAC_CLIENT_INFO_TYPE`, `PAC_ATTRIBUTES_INFO` (flags=1), and `PAC_REQUESTOR_INFO` (SID binding required by CVE-2021-42287 patched DCs).

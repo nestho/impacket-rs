@@ -378,6 +378,18 @@ impl DpapiBlob {
         &self.raw_data
     }
 
+    /// Returns the GUID string formatted without braces, e.g. `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`.
+    pub fn master_key_guid_str(&self) -> String {
+        let b = &self.guid_master_key;
+        let data1 = u32::from_le_bytes([b[0], b[1], b[2], b[3]]);
+        let data2 = u16::from_le_bytes([b[4], b[5]]);
+        let data3 = u16::from_le_bytes([b[6], b[7]]);
+        format!(
+            "{:08x}-{:04x}-{:04x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
+            data1, data2, data3, b[8], b[9], b[10], b[11], b[12], b[13], b[14], b[15]
+        )
+    }
+
     /// Decrypt DPAPI blob payload using the 64-byte decrypted MasterKey.
     pub fn decrypt(&self, master_key: &[u8], entropy: Option<&[u8]>) -> Result<Vec<u8>, CoreError> {
         let key_hash = if master_key.len() == 20 {
@@ -474,6 +486,225 @@ pub fn derive_keys_from_user_key(sid: &str, nt_hash: &[u8; 16]) -> Vec<Vec<u8>> 
     let key2 = hmac_sha1(&tmp2, &sid_utf16)[..20].to_vec();
 
     vec![key1, key2]
+}
+
+/// Parsed `DPAPI_SYSTEM` LSA secret structure.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DpapiSystem {
+    pub version: u32,
+    pub machine_key: [u8; 20],
+    pub user_key: [u8; 20],
+}
+
+impl DpapiSystem {
+    pub fn parse(buf: &[u8]) -> Result<Self, CoreError> {
+        if buf.len() < 44 {
+            return Err(CoreError::BufferUnderflow {
+                needed: 44,
+                available: buf.len(),
+            });
+        }
+        let version = u32::from_le_bytes(buf[0..4].try_into().unwrap());
+        let mut machine_key = [0u8; 20];
+        let mut user_key = [0u8; 20];
+        machine_key.copy_from_slice(&buf[4..24]);
+        user_key.copy_from_slice(&buf[24..44]);
+        Ok(Self {
+            version,
+            machine_key,
+            user_key,
+        })
+    }
+}
+
+/// Windows Credential file wrapper (stored in `AppData\Roaming\Microsoft\Credentials`).
+#[derive(Debug, Clone)]
+pub struct CredentialFile {
+    pub version: u32,
+    pub size: u32,
+    pub unknown: u32,
+    pub blob: DpapiBlob,
+}
+
+impl CredentialFile {
+    pub fn parse(buf: &[u8]) -> Result<Self, CoreError> {
+        if buf.len() < 12 {
+            return Err(CoreError::BufferUnderflow {
+                needed: 12,
+                available: buf.len(),
+            });
+        }
+        let version = u32::from_le_bytes(buf[0..4].try_into().unwrap());
+        let size = u32::from_le_bytes(buf[4..8].try_into().unwrap()) as usize;
+        let unknown = u32::from_le_bytes(buf[8..12].try_into().unwrap());
+        if buf.len() < 12 + size {
+            return Err(CoreError::BufferUnderflow {
+                needed: 12 + size,
+                available: buf.len(),
+            });
+        }
+        let blob_data = &buf[12..12 + size];
+        let blob = DpapiBlob::parse(blob_data)?;
+        Ok(Self {
+            version,
+            size: size as u32,
+            unknown,
+            blob,
+        })
+    }
+}
+
+/// Cleartext decrypted Windows Credential structure (`CREDENTIAL_BLOB`).
+#[derive(Debug, Clone, Default)]
+pub struct CredentialBlob {
+    pub flags: u32,
+    pub cred_type: u32,
+    pub target: String,
+    pub target_alias: String,
+    pub description: String,
+    pub username: String,
+    pub credential_data: Vec<u8>,
+}
+
+impl CredentialBlob {
+    pub fn parse(buf: &[u8]) -> Result<Self, CoreError> {
+        if buf.len() < 52 {
+            return Err(CoreError::BufferUnderflow {
+                needed: 52,
+                available: buf.len(),
+            });
+        }
+        let flags = u32::from_le_bytes(buf[0..4].try_into().unwrap());
+        let cred_type = u32::from_le_bytes(buf[12..16].try_into().unwrap());
+
+        let mut offset = 48usize;
+        // Target
+        if offset + 4 > buf.len() {
+            return Err(CoreError::BufferUnderflow {
+                needed: offset + 4,
+                available: buf.len(),
+            });
+        }
+        let target_size = u32::from_le_bytes(buf[offset..offset + 4].try_into().unwrap()) as usize;
+        offset += 4;
+        if offset + target_size > buf.len() {
+            return Err(CoreError::BufferUnderflow {
+                needed: offset + target_size,
+                available: buf.len(),
+            });
+        }
+        let target = read_utf16le_string(&buf[offset..offset + target_size]);
+        offset += target_size;
+
+        // TargetAlias
+        if offset + 4 > buf.len() {
+            return Err(CoreError::BufferUnderflow {
+                needed: offset + 4,
+                available: buf.len(),
+            });
+        }
+        let alias_size = u32::from_le_bytes(buf[offset..offset + 4].try_into().unwrap()) as usize;
+        offset += 4;
+        if offset + alias_size > buf.len() {
+            return Err(CoreError::BufferUnderflow {
+                needed: offset + alias_size,
+                available: buf.len(),
+            });
+        }
+        let target_alias = read_utf16le_string(&buf[offset..offset + alias_size]);
+        offset += alias_size;
+
+        // Description
+        if offset + 4 > buf.len() {
+            return Err(CoreError::BufferUnderflow {
+                needed: offset + 4,
+                available: buf.len(),
+            });
+        }
+        let desc_size = u32::from_le_bytes(buf[offset..offset + 4].try_into().unwrap()) as usize;
+        offset += 4;
+        if offset + desc_size > buf.len() {
+            return Err(CoreError::BufferUnderflow {
+                needed: offset + desc_size,
+                available: buf.len(),
+            });
+        }
+        let description = read_utf16le_string(&buf[offset..offset + desc_size]);
+        offset += desc_size;
+
+        // CredentialData (Unknown payload in Windows structure)
+        if offset + 4 > buf.len() {
+            return Err(CoreError::BufferUnderflow {
+                needed: offset + 4,
+                available: buf.len(),
+            });
+        }
+        let data_size = u32::from_le_bytes(buf[offset..offset + 4].try_into().unwrap()) as usize;
+        offset += 4;
+        if offset + data_size > buf.len() {
+            return Err(CoreError::BufferUnderflow {
+                needed: offset + data_size,
+                available: buf.len(),
+            });
+        }
+        let credential_data = buf[offset..offset + data_size].to_vec();
+        offset += data_size;
+
+        // Username
+        if offset + 4 > buf.len() {
+            return Err(CoreError::BufferUnderflow {
+                needed: offset + 4,
+                available: buf.len(),
+            });
+        }
+        let user_size = u32::from_le_bytes(buf[offset..offset + 4].try_into().unwrap()) as usize;
+        offset += 4;
+        if offset + user_size > buf.len() {
+            return Err(CoreError::BufferUnderflow {
+                needed: offset + user_size,
+                available: buf.len(),
+            });
+        }
+        let username = read_utf16le_string(&buf[offset..offset + user_size]);
+
+        Ok(Self {
+            flags,
+            cred_type,
+            target,
+            target_alias,
+            description,
+            username,
+            credential_data,
+        })
+    }
+
+    /// Returns the credential payload as a UTF-16LE password string, falling back to hex.
+    pub fn password_str(&self) -> String {
+        if self.credential_data.is_empty() {
+            return String::new();
+        }
+        let utf16_res = read_utf16le_string(&self.credential_data);
+        if !utf16_res.is_empty()
+            && utf16_res
+                .chars()
+                .all(|c| !c.is_control() || c == '\n' || c == '\r' || c == '\t')
+        {
+            utf16_res
+        } else if let Ok(s) = std::str::from_utf8(&self.credential_data) {
+            s.to_string()
+        } else {
+            impacket_core::encode_hex(&self.credential_data)
+        }
+    }
+}
+
+fn read_utf16le_string(bytes: &[u8]) -> String {
+    let u16s: Vec<u16> = bytes
+        .chunks_exact(2)
+        .map(|c| u16::from_le_bytes([c[0], c[1]]))
+        .take_while(|&u| u != 0)
+        .collect();
+    String::from_utf16_lossy(&u16s)
 }
 
 #[cfg(test)]
@@ -577,5 +808,64 @@ mod tests {
         let blob = DpapiBlob::parse(&blob_bytes).unwrap();
         let pt = blob.decrypt(&master_key, None).unwrap();
         assert_eq!(pt, secret);
+    }
+
+    #[test]
+    fn test_dpapi_system_parse() {
+        let mut buf = Vec::new();
+        buf.extend_from_slice(&1u32.to_le_bytes()); // version
+        buf.extend_from_slice(&[0x11u8; 20]); // machine_key
+        buf.extend_from_slice(&[0x22u8; 20]); // user_key
+
+        let dpapi_sys = DpapiSystem::parse(&buf).unwrap();
+        assert_eq!(dpapi_sys.version, 1);
+        assert_eq!(dpapi_sys.machine_key, [0x11u8; 20]);
+        assert_eq!(dpapi_sys.user_key, [0x22u8; 20]);
+    }
+
+    #[test]
+    fn test_credential_blob_and_file_parse() {
+        let target_str = "TERMSRV/dc01.corp.local";
+        let user_str = "Administrator";
+        let pass_str = "SuperSecretP@ss123!";
+
+        let target_utf16: Vec<u8> = target_str.encode_utf16().flat_map(u16::to_le_bytes).collect();
+        let user_utf16: Vec<u8> = user_str.encode_utf16().flat_map(u16::to_le_bytes).collect();
+        let pass_utf16: Vec<u8> = pass_str.encode_utf16().flat_map(u16::to_le_bytes).collect();
+
+        let mut cred_bytes = Vec::new();
+        cred_bytes.extend_from_slice(&0u32.to_le_bytes()); // flags
+        cred_bytes.extend_from_slice(&0u32.to_le_bytes()); // size
+        cred_bytes.extend_from_slice(&0u32.to_le_bytes()); // unknown0
+        cred_bytes.extend_from_slice(&1u32.to_le_bytes()); // type (generic)
+        cred_bytes.extend_from_slice(&0u32.to_le_bytes()); // flags2
+        cred_bytes.extend_from_slice(&0u64.to_le_bytes()); // last_written
+        cred_bytes.extend_from_slice(&0u32.to_le_bytes()); // unknown2
+        cred_bytes.extend_from_slice(&2u32.to_le_bytes()); // persist
+        cred_bytes.extend_from_slice(&0u32.to_le_bytes()); // attr_count
+        cred_bytes.extend_from_slice(&0u64.to_le_bytes()); // unknown3
+
+        // Target
+        cred_bytes.extend_from_slice(&(target_utf16.len() as u32).to_le_bytes());
+        cred_bytes.extend_from_slice(&target_utf16);
+
+        // TargetAlias
+        cred_bytes.extend_from_slice(&0u32.to_le_bytes());
+
+        // Description
+        cred_bytes.extend_from_slice(&0u32.to_le_bytes());
+
+        // CredentialData
+        cred_bytes.extend_from_slice(&(pass_utf16.len() as u32).to_le_bytes());
+        cred_bytes.extend_from_slice(&pass_utf16);
+
+        // Username
+        cred_bytes.extend_from_slice(&(user_utf16.len() as u32).to_le_bytes());
+        cred_bytes.extend_from_slice(&user_utf16);
+
+        let cred = CredentialBlob::parse(&cred_bytes).unwrap();
+        assert_eq!(cred.target, target_str);
+        assert_eq!(cred.username, user_str);
+        assert_eq!(cred.password_str(), pass_str);
     }
 }

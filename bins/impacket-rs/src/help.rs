@@ -770,6 +770,26 @@ options:
 examples:
   impacket-rs dpapi -blob credential.blob -masterkey masterkey.key
 "#),
+        "dpapidump" => Some(r#"Description: Automates extraction of Windows DPAPI credentials and MasterKeys for the SYSTEM user on a remote host.
+
+usage: impacket-rs dpapidump [options] <target>
+
+positional arguments:
+  target: [[domain/]username[:password]@]<targetName or address>
+
+options:
+  -h, --help            show this help message and exit
+  -hashes <LM:NT>       NTLM hashes for authentication
+  -key <HEX>            Pre-extracted DPAPI_SYSTEM user/machine key (skips remote LSA extraction)
+  -bootkey <HEX>        Syskey / bootkey in hex (skips remote SYSTEM hive extraction)
+  -share <SHARE>        SMB share to access filesystem (default: C$)
+  -cred-path <PATH>     Custom directory path to scan for Credential files
+
+examples:
+  impacket-rs dpapidump administrator:Password123@192.168.1.10
+  impacket-rs dpapidump corp.local/admin@dc01 -hashes :31d6cfe0d16ae931b73c59d7e0c089c0
+  impacket-rs dpapidump admin@target -key 0123456789abcdef...
+"#),
         "esentutl" => Some(r#"Description: Inspects and dumps Extensible Storage Engine (ESE / JET Blue) database tables and catalog metadata (e.g. NTDS.DIT).
 
 usage: impacket-rs esentutl [options] <database>
@@ -2147,6 +2167,8 @@ pub fn canonicalize_name(name: &str) -> &'static str {
         "ntdsdump" => "ntdsdump",
         "esentutl" => "esentutl",
         "dpapi" => "dpapi",
+        "dpapidump" => "dpapidump",
+        "dpapi-dump" => "dpapidump",
         "backupkey" => "backupkey",
         "backupkeys" => "backupkey",
         "bkrp" => "backupkey",
@@ -2212,7 +2234,7 @@ mod tests {
             "wspsearch", "rdp_check", "registry-read", "tstool", "ping",
             "tracer", "sniffer", "mqtt_check", "klist", "attrib", "filetime",
             "mssqlinstance", "checkMSSQLStatus", "DumpNTLMInfo", "ntdsdump",
-            "esentutl", "dpapi", "backupkey", "describeTicket", "getPac", "rbcd",
+            "esentutl", "dpapi", "dpapidump", "backupkey", "describeTicket", "getPac", "rbcd",
             "findDelegation", "trueTree", "raiseChild", "smbpasswd", "split",
             "atq", "eventlog", "compat-matrix", "parse-target", "ntlm-hash",
             "krb5-asreq", "smb-negotiate", "rpc-interfaces", "bench-ndr",

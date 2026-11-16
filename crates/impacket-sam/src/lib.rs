@@ -29,7 +29,8 @@ pub use laps::{
 pub use lsa::{LsaCachedLogon, LsaParser, LsaSecretItem};
 pub use ese::{EseDatabase, EseDbHeader, EsePageHeader, EseRecord, EseTableDef, EseValue};
 pub use dpapi::{
-    derive_keys_from_user, derive_keys_from_user_key, DpapiBlob, MasterKey, MasterKeyFile,
+    derive_keys_from_user, derive_keys_from_user_key, CredentialBlob, CredentialFile, DpapiBlob,
+    DpapiSystem, MasterKey, MasterKeyFile,
 };
 pub use ntds::{NtdsAccount, NtdsParser};
 pub use gpp::{decrypt_cpassword, parse_gpp_xml, GppCredential, GPP_AES_KEY};
