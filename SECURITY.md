@@ -10,9 +10,9 @@ We provide security updates and patches for the current release series:
 
 | Version | Supported | Security Maintenance Status |
 |:-------:|:---------:|:----------------------------|
-| `v0.2.x` | :white_check_mark: | Current active release branch |
-| `v0.2.0` | :white_check_mark: | Supported |
-| `v0.1.x` | :x: | Superseded by `v0.2.x` (upgrade recommended) |
+| `v0.4.x` | :white_check_mark: | Current active release branch |
+| `v0.4.1` | :white_check_mark: | Supported (Latest) |
+| `< v0.4.0` | :x: | Superseded by `v0.4.x` (upgrade recommended) |
 
 ---
 
