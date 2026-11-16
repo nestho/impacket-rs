@@ -96,11 +96,13 @@ jobs:
           dpkg-deb --build --root-owner-group "${DEB_ARM64}" "impacket-rs-${TAG}-linux-arm64.deb"
 
           # Convert to RedHat (.rpm) using alien
-          sudo alien -r --nodeps "impacket-rs-${TAG}-linux-amd64.deb"
-          sudo mv impacket-rs*amd64*.rpm "impacket-rs-${TAG}-linux-amd64.rpm" || sudo mv impacket-rs*.x86_64.rpm "impacket-rs-${TAG}-linux-amd64.rpm"
+          sudo alien -r -k "impacket-rs-${TAG}-linux-amd64.deb"
+          RPM_AMD64=$(ls impacket-rs*.rpm | head -n 1)
+          sudo mv "${RPM_AMD64}" "impacket-rs-${TAG}-linux-amd64.rpm"
 
-          sudo alien -r --nodeps "impacket-rs-${TAG}-linux-arm64.deb"
-          sudo mv impacket-rs*arm64*.rpm "impacket-rs-${TAG}-linux-arm64.rpm" || sudo mv impacket-rs*.aarch64.rpm "impacket-rs-${TAG}-linux-arm64.rpm"
+          sudo alien -r -k "impacket-rs-${TAG}-linux-arm64.deb"
+          RPM_ARM64=$(ls impacket-rs*.rpm | grep -v "impacket-rs-${TAG}-linux-amd64.rpm" | head -n 1)
+          sudo mv "${RPM_ARM64}" "impacket-rs-${TAG}-linux-arm64.rpm"
 
           # Upload Linux packages
           gh release upload "${TAG}" \
@@ -197,3 +199,11 @@ jobs:
           cd /tmp/all_release_assets
           sha256sum impacket-rs-* > SHA256SUMS.txt
           gh release upload "${TAG}" SHA256SUMS.txt --clobber
+
+          # Append checksums manifest into release notes
+          CHECKSUMS=$(cat SHA256SUMS.txt)
+          gh release view "${TAG}" --json body --jq .body > /tmp/body.md
+          if ! grep -q "### SHA-256 Checksums" /tmp/body.md; then
+            printf "\n\n### SHA-256 Checksums\n\n\`\`\`\n%s\n\`\`\`\n" "${CHECKSUMS}" >> /tmp/body.md
+            gh release edit "${TAG}" --notes-file /tmp/body.md
+          fi
