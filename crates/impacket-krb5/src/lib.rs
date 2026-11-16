@@ -9,11 +9,14 @@
 pub mod ccache;
 pub mod crypto;
 pub mod fast;
+pub mod keylist;
 pub mod kpasswd;
 pub mod pac;
 pub mod pkinit;
 pub mod tgs;
 pub mod ticketer;
+
+pub use keylist::{create_partial_tgt, dump_user_keylist_live, find_nthash};
 
 pub use fast::{
     build_fast_armored_as_req, decrypt_fast_rep, extract_fast_cookie, extract_pa_fx_fast_reply,

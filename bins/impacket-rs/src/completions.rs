@@ -90,6 +90,8 @@ pub const SUBCOMMANDS: &[(&str, &str)] = &[
     ("rpc-interfaces", "List all well-known DCE/RPC interfaces and GUIDs"),
     ("bench-ndr", "Run NDR serialization and deserialization benchmark suite"),
     ("completions", "Generate shell completion scripts for Bash, Zsh, Fish, or PowerShell"),
+    ("badsuccessor", "Windows Server 2025 Delegated Managed Service Account (dMSA) exploitation suite"),
+    ("keylistattack", "Dump domain user secrets via MS-KILE KERB-KEY-LIST attack with an RODC key"),
 ];
 
 pub fn generate_bash() -> String {
