@@ -34,19 +34,8 @@ install -m 644 packaging/debian/copyright "${BUILD_ROOT}/usr/share/doc/impacket-
 
 BIN_SIZE_KB=$(du -k "${TARGET_BIN}" | cut -f1)
 
-cat <<EOF > "${BUILD_ROOT}/DEBIAN/control"
-Package: impacket-rs
-Version: ${VERSION}
-Section: net
-Priority: optional
-Architecture: ${ARCH}
-Maintainer: Nestho <nestho@icloud.com>
-Installed-Size: ${BIN_SIZE_KB}
-Homepage: https://github.com/nestho/impacket-rs
-Description: High-performance pure-Rust Active Directory and network protocol toolkit
- Impacket-RS is a memory-safe, high-performance pure-Rust rewrite and modernization
- of network protocols and Active Directory security tools for Linux, macOS, and Windows.
-EOF
+sed "s/@VERSION@/${VERSION}/g" "${SCRIPT_DIR}/debian/control.template" > "${BUILD_ROOT}/DEBIAN/control"
+echo "Installed-Size: ${BIN_SIZE_KB}" >> "${BUILD_ROOT}/DEBIAN/control"
 
 echo "[*] Generating ${DEB_NAME}.deb..."
 if command -v dpkg-deb >/dev/null 2>&1; then
