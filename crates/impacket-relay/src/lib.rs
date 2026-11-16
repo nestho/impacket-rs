@@ -28,7 +28,7 @@ pub use rpc::{
 pub use server::{RelayEngine, RelayTarget};
 pub use session::{
     strip_channel_bindings_from_challenge, strip_mic_from_authenticate, NtlmRelaySession,
-    RelayProtocol, RelayState,
+    RelayProtocol, RelayState, STATUS_NETWORK_SESSION_EXPIRED,
 };
 pub use smb::{
     extract_ntlm_from_smb2_security_buffer, wrap_ntlm_challenge_in_spnego,

@@ -23,7 +23,15 @@ This project follows **Semantic Versioning 2.0.0 (SemVer)** and the exact change
 
 ## [Unreleased]
 
-1. Netlogon Remote Protocol (`[MS-NRPC]` & `crates/impacket-msrpc::nrpc`)
+1. Multi-Target User Routing & Session Reuse Relay Engine (`crates/impacket-relay`)
+
+    * **Target User Filtering & Session Cycling (`crates/impacket-relay::server` & `session`)**:
+        * Implemented target URL user filter parsing (`proto://[user@]host[:port][/path]`, supporting `Administrator`, `DOMAIN\user`, and wildcard filters) mirroring upstream `relay-user-multi`.
+        * Added `RelayTarget::matches_user` and `RelayEngine::next_target_for_user` for dynamic multi-target routing based on incoming client identity.
+        * Added `STATUS_NETWORK_SESSION_EXPIRED` (0xC0000203) support to force SMB2 clients to re-authenticate over existing connections, enabling multi-target relaying from a single connection oracle.
+        * Updated `NtlmRelaySession` to extract authenticated domain and username from NTLMSSP Type 3 payloads.
+
+2. Netlogon Remote Protocol (`[MS-NRPC]` & `crates/impacket-msrpc::nrpc`)
 
     * **MS-NRPC Netlogon Interface Client (`crates/impacket-msrpc::nrpc`)**:
         * Implemented pure-Rust RPC methods for Netlogon Remote Protocol (UUID `12345678-1234-abcd-ef00-01234567cffb` v1.0) over `\PIPE\netlogon`.
