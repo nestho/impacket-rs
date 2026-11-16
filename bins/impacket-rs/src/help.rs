@@ -417,6 +417,21 @@ options:
 examples:
   impacket-rs compat-matrix
 "#),
+        "completions" => Some(r#"Description: Generates shell auto-completion scripts for Bash, Zsh, Fish, or PowerShell.
+
+usage: impacket-rs completions <bash|zsh|fish|powershell>
+
+positional arguments:
+  shell: Target shell to generate auto-completion for (bash, zsh, fish, powershell)
+
+options:
+  -h, --help            show this help message and exit
+
+examples:
+  source <(impacket-rs completions bash)
+  impacket-rs completions zsh > ~/.zsh/completion/_impacket-rs
+  impacket-rs completions fish > ~/.config/fish/completions/impacket-rs.fish
+"#),
         "dacledit" => Some(r#"Description: Inspects and modifies Active Directory DACL permissions via LDAP (e.g. GenericAll, WriteDacl).
 
 usage: impacket-rs dacledit [options] <target>
@@ -2091,6 +2106,8 @@ pub fn canonicalize_name(name: &str) -> &'static str {
         "split" => "split",
         "atq" => "atq",
         "eventlog" => "eventlog",
+        "completions" => "completions",
+        "completion" => "completions",
         "compatmatrix" => "compat-matrix",
         "parsetarget" => "parse-target",
         "ntlmhash" => "ntlm-hash",
@@ -2146,6 +2163,7 @@ mod tests {
             "atq", "eventlog", "compat-matrix", "parse-target", "ntlm-hash",
             "krb5-asreq", "smb-negotiate", "rpc-interfaces", "bench-ndr",
             "secretsdump-local", "regsecrets", "netfiles", "smbserver", "smbexec", "dcomexec",
+            "completions",
         ];
         for tool in tools {
             let help = get_tool_help(tool);

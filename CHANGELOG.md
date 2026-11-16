@@ -23,7 +23,13 @@ This project follows **Semantic Versioning 2.0.0 (SemVer)** and the exact change
 
 ## [Unreleased]
 
-Active development for post-v0.4.1 roadmap.
+1. Shell Auto-Completion Generator Suite (Phase 4)
+
+    * **Universal Multi-Shell Auto-Completion (`bins/impacket-rs::completions`)**:
+        * Added native auto-completion script generator supporting **Bash**, **Zsh**, **Fish**, and **PowerShell** (`impacket-rs completions <bash|zsh|fish|powershell>`).
+        * Comprehensive completion coverage across all **75+ subcommands** with concise tool descriptions.
+        * Context-aware argument completion for global options (`-proxy`, `--compat`, `-hashes`, `-no-pass`, `-k`, `-dc-ip`), and subcommand-specific options (`bloodhound`, `coerce`, `certipy`/`adcs`, `whisker`, `secretsdump`, `GetUserSPNs`, `GetNPUsers`, `reg`, `services`, `net`).
+        * Full multi-call binary support: completions register for both `impacket-rs` and `impacket` binary names.
 
 ---
 

@@ -12,6 +12,7 @@
 //! `rpc-interfaces`, `bench-ndr`.
 
 mod help;
+mod completions;
 
 use impacket_auth::{
     compute_ntlm_hashes_with_compat, compute_ntlmv1_response, compute_ntlmv2_response,
@@ -179,6 +180,7 @@ fn print_usage() {
     println!("  smb-negotiate [legacy|auto|modern]                   Build SMBv1/SMB2/SMB3.1.1 Negotiate PDUs");
     println!("  rpc-interfaces                                       Inspect MSRPC interface catalog & SAMR Bind PDU");
     println!("  bench-ndr [ITERATIONS]                               Benchmark compile-time NDR marshaling throughput");
+    println!("  completions <bash|zsh|fish|powershell>               Generate shell auto-completion scripts");
     println!();
     println!("GLOBAL OPTIONS (applicable across all network tools):");
     println!("  -proxy <URL>, --proxy <URL>   Route traffic through SOCKS5 (socks5://host:port) or HTTP (http://host:port) proxy");
@@ -6970,6 +6972,25 @@ fn cmd_bench_ndr(args: &[String]) {
         "  Throughput   : {:.2} million roundtrips/sec (checksum={})",
         ops_per_sec / 1_000_000.0, total_bytes
     );
+}
+
+fn cmd_completions(args: &[String]) {
+    if args.is_empty() {
+        eprintln!("[-] Missing shell argument.");
+        eprintln!("[*] Usage: impacket-rs completions <bash|zsh|fish|powershell>");
+        std::process::exit(1);
+    }
+    match args[0].to_ascii_lowercase().as_str() {
+        "bash" => print!("{}", completions::generate_bash()),
+        "zsh" => print!("{}", completions::generate_zsh()),
+        "fish" => print!("{}", completions::generate_fish()),
+        "powershell" | "pwsh" => print!("{}", completions::generate_powershell()),
+        other => {
+            eprintln!("[-] Unsupported shell: {}", other);
+            eprintln!("[*] Supported shells: bash, zsh, fish, powershell");
+            std::process::exit(1);
+        }
+    }
 }
 
 fn domain_to_base_dn(domain: &str) -> String {
@@ -13788,6 +13809,7 @@ fn main() {
         Some("smb-negotiate") => cmd_smb_negotiate(&args[1..]),
         Some("rpc-interfaces") => cmd_rpc_interfaces(),
         Some("bench-ndr") => cmd_bench_ndr(&args[1..]),
+        Some("completions") | Some("completion") => cmd_completions(&args[1..]),
         _ => print_usage(),
     }
 }
@@ -13921,5 +13943,29 @@ mod tests {
             "invalid".to_string(),
         ];
         assert!(parse_get_user_spns_options(&args_bad).is_err());
+    }
+
+    #[test]
+    fn test_shell_completions_generation() {
+        let bash = completions::generate_bash();
+        assert!(bash.contains("_impacket_rs_complete"));
+        assert!(bash.contains("complete -F _impacket_rs_complete impacket-rs"));
+        assert!(bash.contains("bloodhound"));
+        assert!(bash.contains("secretsdump"));
+        assert!(bash.contains("coerce"));
+
+        let zsh = completions::generate_zsh();
+        assert!(zsh.contains("#compdef impacket-rs impacket"));
+        assert!(zsh.contains("_impacket_rs"));
+        assert!(zsh.contains("bloodhound"));
+
+        let fish = completions::generate_fish();
+        assert!(fish.contains("complete -c impacket-rs"));
+        assert!(fish.contains("complete -c impacket"));
+        assert!(fish.contains("__fish_impacket_rs_no_subcommand"));
+
+        let pwsh = completions::generate_powershell();
+        assert!(pwsh.contains("Register-ArgumentCompleter"));
+        assert!(pwsh.contains("impacket-rs"));
     }
 }
