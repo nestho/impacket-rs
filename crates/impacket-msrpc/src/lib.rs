@@ -24,6 +24,7 @@ pub mod fsrvp;
 pub mod gkdi;
 pub mod lsat;
 pub mod mgmt;
+pub mod nrpc;
 pub mod par;
 pub mod rprn;
 pub mod rrp;
@@ -61,6 +62,11 @@ pub use lsat::{LsatClient, SidNameUse, TranslatedName};
 pub use mgmt::{
     probe_opnums, MgmtClient, OpnumStatus, RpcIfId, MGMT_INTERFACE_UUID, MGMT_VERSION_MAJOR,
     MGMT_VERSION_MINOR,
+};
+pub use nrpc::{
+    channel_type as nrpc_channel_type, negotiate_flags as nrpc_negotiate_flags,
+    DsDomainTrust, NetrAuthenticate3Result, NrpcClient, NRPC_INTERFACE_UUID, NRPC_PIPE,
+    NRPC_VERSION_MAJOR, NRPC_VERSION_MINOR,
 };
 pub use par::{
     AsyncDriverDirResult, AsyncEnumResult, ParClient, SplClientInfo1, PAR_INTERFACE_UUID, PAR_PIPE,
