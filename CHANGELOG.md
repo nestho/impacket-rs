@@ -23,7 +23,18 @@ This project follows **Semantic Versioning 2.0.0 (SemVer)** and the exact change
 
 ## [Unreleased]
 
-1. Windows Server 2025 dMSA Exploitation Suite (`badsuccessor`)
+1. RFC 8009 Kerberos Ciphers & Windows Server 2025 Cryptography Suite
+
+    * **Pure-Rust SHA-384 & HMAC-SHA384 Primitives (`crates/impacket-crypto`)**:
+        * Implemented FIPS 180-4 **SHA-384** digest, RFC 4231 **HMAC-SHA384**, and RFC 2898 **PBKDF2-HMAC-SHA384** without external C or OpenSSL dependencies.
+    * **RFC 8009 Kerberos Encryption Types (`crates/impacket-krb5`)**:
+        * Added full support for **`aes128-cts-hmac-sha256-128`** (etype 19) and **`aes256-cts-hmac-sha384-192`** (etype 20) as enforced by Windows Server 2025 domain controllers.
+        * Implemented RFC 8009 Section 3 NIST SP 800-108 counter mode KDF (**`kdf_hmac_sha256`**, **`kdf_hmac_sha384`**), RFC 8009 Section 5 string-to-key with domain/user salt prefixing, truncated HMAC checksums, and zero-IV AES-CTS authenticated encryption.
+        * Verified against official RFC 8009 Appendix A test vectors across string-to-key, key derivation, checksums, and CTS roundtrips.
+    * **CLI Etype Flag Expansion (`bins/impacket-rs`)**:
+        * Added `aes128-sha2` (19), `aes256-sha2` (20), and `aes-sha2` aliases to `GetUserSPNs -etype` and Kerberos tooling.
+
+2. Windows Server 2025 dMSA Exploitation Suite (`badsuccessor`)
 
     * **Delegated Managed Service Account Engine (`crates/impacket-ldap::dmsa`)**:
         * Implemented Akamai BadSuccessor attack vector targeting Windows Server 2025 Active Directory environments.

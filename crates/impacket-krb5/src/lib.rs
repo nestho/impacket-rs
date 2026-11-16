@@ -39,7 +39,13 @@ pub use pac::{
 };
 
 pub use ccache::CCache;
-pub use crypto::{string_to_key_aes128, string_to_key_aes256};
+pub use crypto::{
+    aes128_cts_hmac_sha256_128_checksum, aes128_cts_hmac_sha256_128_decrypt,
+    aes128_cts_hmac_sha256_128_encrypt, aes256_cts_hmac_sha384_192_checksum,
+    aes256_cts_hmac_sha384_192_decrypt, aes256_cts_hmac_sha384_192_encrypt,
+    kdf_hmac_sha256, kdf_hmac_sha384, string_to_key_aes128, string_to_key_aes256,
+    string_to_key_rfc8009_aes128, string_to_key_rfc8009_aes256,
+};
 pub use pkinit::{
     build_pa_pk_as_req, derive_pkinit_reply_key, extract_pkinit_kdc_dh_public_and_nonce,
     parse_pkcs12, PkinitCredentials, PkinitDhState, PA_PK_AS_REP, PA_PK_AS_REQ,
@@ -65,6 +71,8 @@ pub enum KerberosEType {
     DesCbcMd5 = 3,
     Aes128CtsHmacSha1_96 = 17,
     Aes256CtsHmacSha1_96 = 18,
+    Aes128CtsHmacSha256_128 = 19,
+    Aes256CtsHmacSha384_192 = 20,
     Rc4Hmac = 23,
     Rc4HmacExp = 24,
 }
@@ -76,6 +84,8 @@ impl KerberosEType {
             3 => Some(Self::DesCbcMd5),
             17 => Some(Self::Aes128CtsHmacSha1_96),
             18 => Some(Self::Aes256CtsHmacSha1_96),
+            19 => Some(Self::Aes128CtsHmacSha256_128),
+            20 => Some(Self::Aes256CtsHmacSha384_192),
             23 => Some(Self::Rc4Hmac),
             24 => Some(Self::Rc4HmacExp),
             _ => None,
@@ -88,6 +98,8 @@ impl KerberosEType {
             Self::DesCbcMd5 => "des-cbc-md5 (3) [Legacy Win2000]",
             Self::Aes128CtsHmacSha1_96 => "aes128-cts-hmac-sha1-96 (17)",
             Self::Aes256CtsHmacSha1_96 => "aes256-cts-hmac-sha1-96 (18)",
+            Self::Aes128CtsHmacSha256_128 => "aes128-cts-hmac-sha256-128 (19) [RFC8009/Win2025]",
+            Self::Aes256CtsHmacSha384_192 => "aes256-cts-hmac-sha384-192 (20) [RFC8009/Win2025]",
             Self::Rc4Hmac => "rc4-hmac / arcfour-hmac-md5 (23)",
             Self::Rc4HmacExp => "rc4-hmac-exp (24)",
         }
