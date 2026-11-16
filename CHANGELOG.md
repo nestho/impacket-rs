@@ -23,7 +23,14 @@ This project follows **Semantic Versioning 2.0.0 (SemVer)** and the exact change
 
 ## [Unreleased]
 
-1. Print System Asynchronous Remote Protocol (`[MS-PAR]` & `crates/impacket-msrpc::par`)
+1. Netlogon Remote Protocol (`[MS-NRPC]` & `crates/impacket-msrpc::nrpc`)
+
+    * **MS-NRPC Netlogon Interface Client (`crates/impacket-msrpc::nrpc`)**:
+        * Implemented pure-Rust RPC methods for Netlogon Remote Protocol (UUID `12345678-1234-abcd-ef00-01234567cffb` v1.0) over `\PIPE\netlogon`.
+        * Implemented `NetrServerReqChallenge` (Opnum 4), `NetrServerAuthenticate3` (Opnum 26) with channel negotiation and DC credential derivation, `NetrServerPasswordSet2` (Opnum 30) for secure channel password modification (supporting CVE-2020-1472 Zerologon zero-key flows), `NetrEnumerateTrustedDomainsEx` (Opnum 36) parsing domain trusts with SIDs and GUIDs, and `NetrGetDCName` (Opnum 11).
+        * Added `NrpcClient` over generic `RpcTransport`.
+
+2. Print System Asynchronous Remote Protocol (`[MS-PAR]` & `crates/impacket-msrpc::par`)
 
     * **MS-PAR Spooler Interface Client (`crates/impacket-msrpc::par`)**:
         * Implemented pure-Rust RPC methods for Print System Asynchronous Remote Protocol (UUID `76f03f96-cdfd-44fc-a22c-64950a001209` v1.0 and WinSpool `9940ca8e-512f-4c58-88a9-61098d6896bd`) over `\PIPE\spoolss`.
