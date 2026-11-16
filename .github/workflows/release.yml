@@ -94,5 +94,5 @@ jobs:
           install -m 644 crates/impacket-cabi/include/impacket.h "${DEB_DIR}/usr/include/impacket.h"
           install -m 644 packaging/debian/copyright "${DEB_DIR}/usr/share/doc/impacket-rs/copyright"
           cat packaging/debian/control | sed "s/Version:.*/Version: ${VERSION}/" > "${DEB_DIR}/DEBIAN/control"
-          dpkg-deb --build --root-owner-group "${DEB_DIR}"
-          gh release upload "${{ github.ref_name }}" "${DEB_DIR}.deb" --clobber
+          dpkg-deb --build --root-owner-group "${DEB_DIR}" "impacket-rs-${{ matrix.target }}.deb"
+          gh release upload "${{ github.ref_name }}" "impacket-rs-${{ matrix.target }}.deb" --clobber
