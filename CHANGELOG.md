@@ -21,6 +21,10 @@ This project follows **Semantic Versioning 2.0.0 (SemVer)** and the exact change
 
 ---
 
+## [Unreleased]
+
+---
+
 ## [v0.5.0] - 2026-11-16
 
 1. Multi-Target User Routing & Session Reuse Relay Engine (`crates/impacket-relay`)
