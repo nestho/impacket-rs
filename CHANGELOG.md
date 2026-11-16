@@ -21,6 +21,85 @@ This project follows **Semantic Versioning 2.0.0 (SemVer)** and the exact change
 
 ---
 
+## [v0.5.0] - 2026-11-16
+
+1. Multi-Target User Routing & Session Reuse Relay Engine (`crates/impacket-relay`)
+
+    * **Target User Filtering & Session Cycling (`crates/impacket-relay::server` & `session`)**:
+        * Implemented target URL user filter parsing (`proto://[user@]host[:port][/path]`, supporting `Administrator`, `DOMAIN\user`, and wildcard filters) mirroring upstream `relay-user-multi`.
+        * Added `RelayTarget::matches_user` and `RelayEngine::next_target_for_user` for dynamic multi-target routing based on incoming client identity.
+        * Added `STATUS_NETWORK_SESSION_EXPIRED` (0xC0000203) support to force SMB2 clients to re-authenticate over existing connections, enabling multi-target relaying from a single connection oracle.
+        * Updated `NtlmRelaySession` to extract authenticated domain and username from NTLMSSP Type 3 payloads.
+
+2. Netlogon Remote Protocol (`[MS-NRPC]` & `crates/impacket-msrpc::nrpc`)
+
+    * **MS-NRPC Netlogon Interface Client (`crates/impacket-msrpc::nrpc`)**:
+        * Implemented pure-Rust RPC methods for Netlogon Remote Protocol (UUID `12345678-1234-abcd-ef00-01234567cffb` v1.0) over `\PIPE\netlogon`.
+        * Implemented `NetrServerReqChallenge` (Opnum 4), `NetrServerAuthenticate3` (Opnum 26) with channel negotiation and DC credential derivation, `NetrServerPasswordSet2` (Opnum 30) for secure channel password modification (supporting CVE-2020-1472 Zerologon zero-key flows), `NetrEnumerateTrustedDomainsEx` (Opnum 36) parsing domain trusts with SIDs and GUIDs, and `NetrGetDCName` (Opnum 11).
+        * Added `NrpcClient` over generic `RpcTransport`.
+
+2. Print System Asynchronous Remote Protocol (`[MS-PAR]` & `crates/impacket-msrpc::par`)
+
+    * **MS-PAR Spooler Interface Client (`crates/impacket-msrpc::par`)**:
+        * Implemented pure-Rust RPC methods for Print System Asynchronous Remote Protocol (UUID `76f03f96-cdfd-44fc-a22c-64950a001209` v1.0 and WinSpool `9940ca8e-512f-4c58-88a9-61098d6896bd`) over `\PIPE\spoolss`.
+        * Implemented `RpcAsyncOpenPrinter` (Opnum 0) with `SPLCLIENT_CONTAINER` Level 1 negotiation, `RpcAsyncClosePrinter` (Opnum 20), `RpcAsyncEnumPrinters` (Opnum 38), and `RpcAsyncGetPrinterDriverDirectory` (Opnum 41).
+        * Added `ParClient` supporting two-stage buffer discovery (`ERROR_INSUFFICIENT_BUFFER` 122 query -> allocated fetch).
+
+2. Remote DPAPI System & Credential Harvester (`dpapidump` & `crates/impacket-sam`)
+
+    * **DPAPI System & Credential Blob Parser (`crates/impacket-sam::dpapi`)**:
+        * Implemented `DpapiSystem` parsing LSA `DPAPI_SYSTEM` 44-byte structure into `machine_key` and `user_key` with SHA-1 validation.
+        * Implemented `CredentialFile` parsing Windows DPAPI credential files (`AppData\Local\Microsoft\Credentials` and `Roaming`).
+        * Implemented `CredentialBlob` parsing decrypted `CREDENTIAL_BLOB` structures extracting target name, user name, and plaintext credential data.
+        * Added `DpapiBlob::master_key_guid_str()` helper for formatted GUID directory and file lookups.
+    * **Remote Harvester CLI & Offline Decryption (`bins/impacket-rs`)**:
+        * Implemented `dpapidump` CLI tool connecting over SMB, pulling `DPAPI_SYSTEM` secret via MS-RRP/LSA secrets or `-key`, traversing user and system credential directories, resolving master key files from `\Windows\System32\Microsoft\Protect\S-1-5-18\User\<guid>`, decrypting master keys, and dumping plaintext target credentials.
+        * Extended `dpapi` CLI tool with `credential` / `cred` offline mode to decrypt saved credential files using `-masterkey` or `-key`.
+        * Added shell auto-completions and help reference for `dpapidump`.
+
+2. RODC Kerberos Key List Attack Engine (`keylistattack` / `MS-KILE`)
+
+    * **RODC Credential Extraction Engine (`crates/impacket-krb5::keylist`)**:
+        * Implemented MS-KILE Section 3.3.5.6.4 and issue #1667 partial TGT forging with embedded `PAC_LOGON_INFO`, `PAC_CLIENT_INFO_TYPE`, `PAC_ATTRIBUTES_INFO` (flags=1), and `PAC_REQUESTOR_INFO` (SID binding required by CVE-2021-42287 patched DCs).
+        * Supported `kvno = rodc_no << 16` and dual-signature verification using the RODC account's AES or RC4 key.
+        * Implemented `KERB-KEY-LIST-REQ` (PA-DATA 161) in `Krb5TgsReq` and ASN.1 `KERB-KEY-LIST-REP` (PA-DATA 162) extraction from decrypted `EncTGSRepPart` in `Krb5TgsRep`, correctly resolving type 162 regardless of ordering alongside modern `PA-SUPPORTED-ENCTYPES` (165).
+    * **Active Directory RODC Dumper CLI (`bins/impacket-rs`)**:
+        * Added `keylistattack` (with `keylistdump` alias) CLI tool supporting automated target user enumeration via MS-SAMR (filtering Denied RODC Password Replication Group RID 572), single target `-t`, or bulk target file `-tf`.
+        * Integrated shell auto-completions and detailed tool documentation.
+
+2. RFC 8009 Kerberos Ciphers & Windows Server 2025 Cryptography Suite
+
+    * **Pure-Rust SHA-384 & HMAC-SHA384 Primitives (`crates/impacket-crypto`)**:
+        * Implemented FIPS 180-4 **SHA-384** digest, RFC 4231 **HMAC-SHA384**, and RFC 2898 **PBKDF2-HMAC-SHA384** without external C or OpenSSL dependencies.
+    * **RFC 8009 Kerberos Encryption Types (`crates/impacket-krb5`)**:
+        * Added full support for **`aes128-cts-hmac-sha256-128`** (etype 19) and **`aes256-cts-hmac-sha384-192`** (etype 20) as enforced by Windows Server 2025 domain controllers.
+        * Implemented RFC 8009 Section 3 NIST SP 800-108 counter mode KDF (**`kdf_hmac_sha256`**, **`kdf_hmac_sha384`**), RFC 8009 Section 5 string-to-key with domain/user salt prefixing, truncated HMAC checksums, and zero-IV AES-CTS authenticated encryption.
+        * Verified against official RFC 8009 Appendix A test vectors across string-to-key, key derivation, checksums, and CTS roundtrips.
+    * **CLI Etype Flag Expansion (`bins/impacket-rs`)**:
+        * Added `aes128-sha2` (19), `aes256-sha2` (20), and `aes-sha2` aliases to `GetUserSPNs -etype` and Kerberos tooling.
+
+2. Windows Server 2025 dMSA Exploitation Suite (`badsuccessor`)
+
+    * **Delegated Managed Service Account Engine (`crates/impacket-ldap::dmsa`)**:
+        * Implemented Akamai BadSuccessor attack vector targeting Windows Server 2025 Active Directory environments.
+        * **OU Vulnerability Scanner (`scan_vulnerable_ous`)**: Audits Organizational Units for loose ACLs granting non-admin accounts `CreateChild` (`msDS-DelegatedManagedServiceAccount` schema GUID `0feb936f-47b3-49f2-9386-1dedc2c23765`), `GenericAll`, `WriteDacl`, or `WriteOwner` rights.
+        * **dMSA Account Provisioner (`add_dmsa`)**: Provisions `msDS-DelegatedManagedServiceAccount` objects configuring `msDS-ManagedAccountPrecededByLink` linking to target predecessor accounts (Domain Admins / Domain Controllers) and `msDS-GroupMSAMembership` access control entries.
+        * **Management Lifecycle (`delete_dmsa`, `modify_dmsa_predecessor`)**: Supports removing created dMSA objects and modifying predecessor links.
+
+    * **Unified `badsuccessor` CLI Subcommand (`bins/impacket-rs`)**:
+        * Added `impacket-rs badsuccessor <TARGET> -action <search|add|delete|modify> [options]`.
+        * Comprehensive parameters: `-target-ou`, `-dmsa-name`, `-target-account`, `-principals-allowed`, `-dns-hostname`, and `-base-dn`.
+
+2. Shell Auto-Completion Generator Suite (Phase 4)
+
+    * **Universal Multi-Shell Auto-Completion (`bins/impacket-rs::completions`)**:
+        * Added native auto-completion script generator supporting **Bash**, **Zsh**, **Fish**, and **PowerShell** (`impacket-rs completions <bash|zsh|fish|powershell>`).
+        * Comprehensive completion coverage across all **75+ subcommands** with concise tool descriptions.
+        * Context-aware argument completion for global options (`-proxy`, `--compat`, `-hashes`, `-no-pass`, `-k`, `-dc-ip`), and subcommand-specific options (`bloodhound`, `coerce`, `certipy`/`adcs`, `whisker`, `secretsdump`, `GetUserSPNs`, `GetNPUsers`, `reg`, `services`, `net`).
+        * Full multi-call binary support: completions register for both `impacket-rs` and `impacket` binary names.
+
+---
+
 ## [v0.4.1] - 2026-11-16
 
 1. Multi-Platform OS Packaging & Professional Distribution Suite

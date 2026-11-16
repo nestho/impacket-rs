@@ -319,6 +319,270 @@ pub fn aes256_cts_hmac_sha1_96_decrypt(
     Ok(decrypted[16..].to_vec())
 }
 
+/// RFC 8009 Key Derivation Function (KDF-HMAC-SHA2).
+/// Uses NIST SP 800-108 counter mode with HMAC-SHA256:
+/// `[i]_4 || label || 0x00 || context || [k * 8]_4`
+pub fn kdf_hmac_sha256(key: &[u8], label: &[u8], context: &[u8], key_len: usize) -> Vec<u8> {
+    let mut out = Vec::with_capacity(key_len);
+    let mut i = 1u32;
+    let k_bits = (key_len * 8) as u32;
+
+    while out.len() < key_len {
+        let mut msg = Vec::with_capacity(4 + label.len() + 1 + context.len() + 4);
+        msg.extend_from_slice(&i.to_be_bytes());
+        msg.extend_from_slice(label);
+        msg.push(0x00);
+        msg.extend_from_slice(context);
+        msg.extend_from_slice(&k_bits.to_be_bytes());
+
+        let block = impacket_crypto::hmac_sha256(key, &msg);
+        let take = std::cmp::min(key_len - out.len(), 32);
+        out.extend_from_slice(&block[..take]);
+        i += 1;
+    }
+    out
+}
+
+/// RFC 8009 Key Derivation Function (KDF-HMAC-SHA2).
+/// Uses NIST SP 800-108 counter mode with HMAC-SHA384:
+/// `[i]_4 || label || 0x00 || context || [k * 8]_4`
+pub fn kdf_hmac_sha384(key: &[u8], label: &[u8], context: &[u8], key_len: usize) -> Vec<u8> {
+    let mut out = Vec::with_capacity(key_len);
+    let mut i = 1u32;
+    let k_bits = (key_len * 8) as u32;
+
+    while out.len() < key_len {
+        let mut msg = Vec::with_capacity(4 + label.len() + 1 + context.len() + 4);
+        msg.extend_from_slice(&i.to_be_bytes());
+        msg.extend_from_slice(label);
+        msg.push(0x00);
+        msg.extend_from_slice(context);
+        msg.extend_from_slice(&k_bits.to_be_bytes());
+
+        let block = impacket_crypto::hmac_sha384(key, &msg);
+        let take = std::cmp::min(key_len - out.len(), 48);
+        out.extend_from_slice(&block[..take]);
+        i += 1;
+    }
+    out
+}
+
+/// RFC 8009 Section 5 string-to-key for `aes128-cts-hmac-sha256-128` (etype 19).
+pub fn string_to_key_rfc8009_aes128(password: &[u8], salt: &[u8], iter_count: u32) -> [u8; 16] {
+    let mut saltp = Vec::with_capacity(28 + salt.len());
+    saltp.extend_from_slice(b"aes128-cts-hmac-sha256-128\0");
+    saltp.extend_from_slice(salt);
+
+    let iters = if iter_count == 0 { 32768 } else { iter_count };
+    let tkey = impacket_crypto::pbkdf2_hmac_sha256(password, &saltp, iters, 16);
+    let derived = kdf_hmac_sha256(&tkey, b"kerberos", b"", 16);
+
+    let mut out = [0u8; 16];
+    out.copy_from_slice(&derived);
+    out
+}
+
+/// RFC 8009 Section 5 string-to-key for `aes256-cts-hmac-sha384-192` (etype 20).
+pub fn string_to_key_rfc8009_aes256(password: &[u8], salt: &[u8], iter_count: u32) -> [u8; 32] {
+    let mut saltp = Vec::with_capacity(28 + salt.len());
+    saltp.extend_from_slice(b"aes256-cts-hmac-sha384-192\0");
+    saltp.extend_from_slice(salt);
+
+    let iters = if iter_count == 0 { 32768 } else { iter_count };
+    let tkey = impacket_crypto::pbkdf2_hmac_sha384(password, &saltp, iters, 32);
+    let derived = kdf_hmac_sha384(&tkey, b"kerberos", b"", 32);
+
+    let mut out = [0u8; 32];
+    out.copy_from_slice(&derived);
+    out
+}
+
+/// RFC 8009 checksum for `aes128-cts-hmac-sha256-128` (etype 19).
+pub fn aes128_cts_hmac_sha256_128_checksum(key: &[u8; 16], keyusage: i32, data: &[u8]) -> [u8; 16] {
+    let mut label = [0u8; 5];
+    label[..4].copy_from_slice(&(keyusage as u32).to_be_bytes());
+    label[4] = 0x99;
+
+    let kc = kdf_hmac_sha256(key, &label, b"", 16);
+    let hash = impacket_crypto::hmac_sha256(&kc, data);
+    let mut out = [0u8; 16];
+    out.copy_from_slice(&hash[..16]);
+    out
+}
+
+/// RFC 8009 checksum for `aes256-cts-hmac-sha384-192` (etype 20).
+pub fn aes256_cts_hmac_sha384_192_checksum(key: &[u8; 32], keyusage: i32, data: &[u8]) -> [u8; 24] {
+    let mut label = [0u8; 5];
+    label[..4].copy_from_slice(&(keyusage as u32).to_be_bytes());
+    label[4] = 0x99;
+
+    let kc = kdf_hmac_sha384(key, &label, b"", 24);
+    let hash = impacket_crypto::hmac_sha384(&kc, data);
+    let mut out = [0u8; 24];
+    out.copy_from_slice(&hash[..24]);
+    out
+}
+
+/// RFC 8009 encryption for `aes128-cts-hmac-sha256-128` (etype 19).
+pub fn aes128_cts_hmac_sha256_128_encrypt(
+    key: &[u8; 16],
+    keyusage: i32,
+    plaintext: &[u8],
+    confounder: &[u8; 16],
+) -> Result<Vec<u8>, impacket_core::CoreError> {
+    let mut l_ke = [0u8; 5];
+    l_ke[..4].copy_from_slice(&(keyusage as u32).to_be_bytes());
+    l_ke[4] = 0xAA;
+    let ke = kdf_hmac_sha256(key, &l_ke, b"", 16);
+
+    let mut l_ki = [0u8; 5];
+    l_ki[..4].copy_from_slice(&(keyusage as u32).to_be_bytes());
+    l_ki[4] = 0x55;
+    let ki = kdf_hmac_sha256(key, &l_ki, b"", 16);
+
+    let mut data = Vec::with_capacity(16 + plaintext.len());
+    data.extend_from_slice(confounder);
+    data.extend_from_slice(plaintext);
+
+    let iv = [0u8; 16];
+    let mut ke_arr = [0u8; 16];
+    ke_arr.copy_from_slice(&ke);
+    let ciphertext = impacket_crypto::aes128_cts_encrypt(&ke_arr, &iv, &data)?;
+
+    let mut hmac_input = Vec::with_capacity(16 + ciphertext.len());
+    hmac_input.extend_from_slice(&iv);
+    hmac_input.extend_from_slice(&ciphertext);
+    let mac = impacket_crypto::hmac_sha256(&ki, &hmac_input);
+
+    let mut out = Vec::with_capacity(ciphertext.len() + 16);
+    out.extend_from_slice(&ciphertext);
+    out.extend_from_slice(&mac[..16]);
+    Ok(out)
+}
+
+/// RFC 8009 decryption for `aes128-cts-hmac-sha256-128` (etype 19).
+pub fn aes128_cts_hmac_sha256_128_decrypt(
+    key: &[u8; 16],
+    keyusage: i32,
+    ciphertext: &[u8],
+) -> Result<Vec<u8>, impacket_core::CoreError> {
+    if ciphertext.len() < 16 + 16 {
+        return Err(impacket_core::CoreError::BufferUnderflow {
+            needed: 32,
+            available: ciphertext.len(),
+        });
+    }
+    let ct_len = ciphertext.len() - 16;
+    let ct = &ciphertext[..ct_len];
+    let expected_mac = &ciphertext[ct_len..];
+
+    let mut l_ke = [0u8; 5];
+    l_ke[..4].copy_from_slice(&(keyusage as u32).to_be_bytes());
+    l_ke[4] = 0xAA;
+    let ke = kdf_hmac_sha256(key, &l_ke, b"", 16);
+
+    let mut l_ki = [0u8; 5];
+    l_ki[..4].copy_from_slice(&(keyusage as u32).to_be_bytes());
+    l_ki[4] = 0x55;
+    let ki = kdf_hmac_sha256(key, &l_ki, b"", 16);
+
+    let iv = [0u8; 16];
+    let mut hmac_input = Vec::with_capacity(16 + ct.len());
+    hmac_input.extend_from_slice(&iv);
+    hmac_input.extend_from_slice(ct);
+    let actual_mac = impacket_crypto::hmac_sha256(&ki, &hmac_input);
+    if &actual_mac[..16] != expected_mac {
+        return Err(impacket_core::CoreError::ProtocolError(
+            "RFC 8009 AES-128-CTS checksum mismatch".into(),
+        ));
+    }
+
+    let mut ke_arr = [0u8; 16];
+    ke_arr.copy_from_slice(&ke);
+    let decrypted = impacket_crypto::aes128_cts_decrypt(&ke_arr, &iv, ct)?;
+    Ok(decrypted[16..].to_vec())
+}
+
+/// RFC 8009 encryption for `aes256-cts-hmac-sha384-192` (etype 20).
+pub fn aes256_cts_hmac_sha384_192_encrypt(
+    key: &[u8; 32],
+    keyusage: i32,
+    plaintext: &[u8],
+    confounder: &[u8; 16],
+) -> Result<Vec<u8>, impacket_core::CoreError> {
+    let mut l_ke = [0u8; 5];
+    l_ke[..4].copy_from_slice(&(keyusage as u32).to_be_bytes());
+    l_ke[4] = 0xAA;
+    let ke = kdf_hmac_sha384(key, &l_ke, b"", 32);
+
+    let mut l_ki = [0u8; 5];
+    l_ki[..4].copy_from_slice(&(keyusage as u32).to_be_bytes());
+    l_ki[4] = 0x55;
+    let ki = kdf_hmac_sha384(key, &l_ki, b"", 24);
+
+    let mut data = Vec::with_capacity(16 + plaintext.len());
+    data.extend_from_slice(confounder);
+    data.extend_from_slice(plaintext);
+
+    let iv = [0u8; 16];
+    let mut ke_arr = [0u8; 32];
+    ke_arr.copy_from_slice(&ke);
+    let ciphertext = impacket_crypto::aes256_cts_encrypt(&ke_arr, &iv, &data)?;
+
+    let mut hmac_input = Vec::with_capacity(16 + ciphertext.len());
+    hmac_input.extend_from_slice(&iv);
+    hmac_input.extend_from_slice(&ciphertext);
+    let mac = impacket_crypto::hmac_sha384(&ki, &hmac_input);
+
+    let mut out = Vec::with_capacity(ciphertext.len() + 24);
+    out.extend_from_slice(&ciphertext);
+    out.extend_from_slice(&mac[..24]);
+    Ok(out)
+}
+
+/// RFC 8009 decryption for `aes256-cts-hmac-sha384-192` (etype 20).
+pub fn aes256_cts_hmac_sha384_192_decrypt(
+    key: &[u8; 32],
+    keyusage: i32,
+    ciphertext: &[u8],
+) -> Result<Vec<u8>, impacket_core::CoreError> {
+    if ciphertext.len() < 16 + 24 {
+        return Err(impacket_core::CoreError::BufferUnderflow {
+            needed: 40,
+            available: ciphertext.len(),
+        });
+    }
+    let ct_len = ciphertext.len() - 24;
+    let ct = &ciphertext[..ct_len];
+    let expected_mac = &ciphertext[ct_len..];
+
+    let mut l_ke = [0u8; 5];
+    l_ke[..4].copy_from_slice(&(keyusage as u32).to_be_bytes());
+    l_ke[4] = 0xAA;
+    let ke = kdf_hmac_sha384(key, &l_ke, b"", 32);
+
+    let mut l_ki = [0u8; 5];
+    l_ki[..4].copy_from_slice(&(keyusage as u32).to_be_bytes());
+    l_ki[4] = 0x55;
+    let ki = kdf_hmac_sha384(key, &l_ki, b"", 24);
+
+    let iv = [0u8; 16];
+    let mut hmac_input = Vec::with_capacity(16 + ct.len());
+    hmac_input.extend_from_slice(&iv);
+    hmac_input.extend_from_slice(ct);
+    let actual_mac = impacket_crypto::hmac_sha384(&ki, &hmac_input);
+    if &actual_mac[..24] != expected_mac {
+        return Err(impacket_core::CoreError::ProtocolError(
+            "RFC 8009 AES-256-CTS checksum mismatch".into(),
+        ));
+    }
+
+    let mut ke_arr = [0u8; 32];
+    ke_arr.copy_from_slice(&ke);
+    let decrypted = impacket_crypto::aes256_cts_decrypt(&ke_arr, &iv, ct)?;
+    Ok(decrypted[16..].to_vec())
+}
+
 /// Converts Unix seconds to a Kerberos `GeneralizedTime` string `YYYYMMDDHHMMSSZ` (UTC), without any
 /// external date library (civil-from-days, Howard Hinnant's algorithm).
 pub fn unix_to_kerberos_time(unix_secs: i64) -> String {
@@ -439,5 +703,58 @@ mod tests {
             encode_hex(&k256_1200),
             "55a6ac740ad17b4846941051e1e8b0a7548d93b0ab30a8bc3ff16280382b8c2a"
         );
+    }
+
+    #[test]
+    fn test_rfc8009_test_vectors() {
+        use impacket_core::encode_hex;
+        // RFC 8009 Appendix A test vectors
+        let pw = b"password";
+        let mut salt = [0u8; 37];
+        let salt_prefix = [0x10, 0xDF, 0x9D, 0xD7, 0x83, 0xE5, 0xBC, 0x8A, 0xCE, 0xA1, 0x73, 0x0E, 0x74, 0x35, 0x5F, 0x61];
+        salt[..16].copy_from_slice(&salt_prefix);
+        salt[16..].copy_from_slice(b"ATHENA.MIT.EDUraeburn");
+
+        let k128 = string_to_key_rfc8009_aes128(pw, &salt, 32768);
+        assert_eq!(encode_hex(&k128), "089bca48b105ea6ea77ca5d2f39dc5e7");
+
+        let k256 = string_to_key_rfc8009_aes256(pw, &salt, 32768);
+        assert_eq!(
+            encode_hex(&k256),
+            "45bd806dbf6a833a9cffc1c94589a222367a79bc21c413718906e9f578a78467"
+        );
+
+        // Checksums
+        let base_key128 = [
+            0x37, 0x05, 0xD9, 0x60, 0x80, 0xC1, 0x77, 0x28,
+            0xA0, 0xE8, 0x00, 0xEA, 0xB6, 0xE0, 0xD2, 0x3C,
+        ];
+        let plaintext: Vec<u8> = (0..21).collect();
+        let cs128 = aes128_cts_hmac_sha256_128_checksum(&base_key128, 2, &plaintext);
+        assert_eq!(encode_hex(&cs128), "d78367186643d67b411cba9139fc1dee");
+
+        let base_key256 = [
+            0x6D, 0x40, 0x4D, 0x37, 0xFA, 0xF7, 0x9F, 0x9D,
+            0xF0, 0xD3, 0x35, 0x68, 0xD3, 0x20, 0x66, 0x98,
+            0x00, 0xEB, 0x48, 0x36, 0x47, 0x2E, 0xA8, 0xA0,
+            0x26, 0xD1, 0x6B, 0x71, 0x82, 0x46, 0x0C, 0x52,
+        ];
+        let cs256 = aes256_cts_hmac_sha384_192_checksum(&base_key256, 2, &plaintext);
+        assert_eq!(
+            encode_hex(&cs256),
+            "45ee791567eefca37f4ac1e0222de80d43c3bfa06699672a"
+        );
+
+        // Encryption and decryption roundtrip
+        let confounder = [0x5au8; 16];
+        let secret_msg = b"Top Secret Windows Server 2025 Payload";
+
+        let enc128 = aes128_cts_hmac_sha256_128_encrypt(&base_key128, 2, secret_msg, &confounder).unwrap();
+        let dec128 = aes128_cts_hmac_sha256_128_decrypt(&base_key128, 2, &enc128).unwrap();
+        assert_eq!(dec128, secret_msg);
+
+        let enc256 = aes256_cts_hmac_sha384_192_encrypt(&base_key256, 2, secret_msg, &confounder).unwrap();
+        let dec256 = aes256_cts_hmac_sha384_192_decrypt(&base_key256, 2, &enc256).unwrap();
+        assert_eq!(dec256, secret_msg);
     }
 }

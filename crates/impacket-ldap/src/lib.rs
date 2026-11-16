@@ -7,6 +7,7 @@ pub mod bloodhound;
 pub mod client;
 pub mod dacledit;
 pub mod delegation;
+pub mod dmsa;
 pub mod dnsp;
 pub mod keycredential;
 pub mod rbcd;
@@ -26,6 +27,12 @@ pub use bloodhound::{
 pub use client::{read_ldap_message, LdapClient, LdapEntry};
 pub use dacledit::{grant_right, read_dacl, revoke_rights, write_dacl, DaclRight};
 pub use delegation::{find_delegation, DelegationRecord, DelegationType};
+pub use dmsa::{
+    add_dmsa, build_dmsa_attributes, build_dmsa_membership_sd, delete_dmsa,
+    is_excluded_admin_sid, modify_dmsa_predecessor, resolve_well_known_sid, scan_vulnerable_ous,
+    VulnerableOu, ATTR_GROUP_MSA_MEMBERSHIP, ATTR_MANAGED_ACCOUNT_PRECEDED_BY_LINK,
+    DMSA_SCHEMA_GUID_STR,
+};
 pub use dnsp::{
     add_dns_node, decode_dns_rpc_name, delete_dns_node, encode_dns_rpc_name,
     format_dns_record_data, list_dns_zones, modify_dns_node, query_dns_node,

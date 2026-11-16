@@ -228,7 +228,7 @@ options:
   -request-user <USER>   Request TGS tickets targeting a specific user only
   -outputfile <FILE>     Output filename to write captured TGS hashes to
   -aes                   Request AES-256 and AES-128 tickets (Hashcat modes 19700/19600)
-  -etype <TYPE>          Kerberos encryption type: rc4, aes128, aes256, aes, all
+  -etype <TYPE>          Kerberos encryption type: rc4, aes128, aes256, aes128-sha2, aes256-sha2, aes-sha2, aes, all
   -save                  Save acquired tickets to .ccache files
 
 authentication:
@@ -272,6 +272,54 @@ authentication:
 
 examples:
   impacket-rs addcomputer corp.local/jdoe:Pass123!@192.168.1.10 -computer-name FAKEDC -computer-pass ComputerPass123!
+"#),
+        "badsuccessor" => Some(r#"Description: Windows Server 2025 Delegated Managed Service Account (dMSA) exploitation suite (BadSuccessor).
+
+usage: impacket-rs badsuccessor [options] <target>
+
+positional arguments:
+  target: [host] or [[domain/]username[:password]@]<host>
+
+options:
+  -h, --help            show this help message and exit
+  -action <ACTION>      Action to perform: search (default), add, delete, modify
+  -target-ou <OU_DN>    Specific OU to target or check (e.g., "OU=VulnerableOU,DC=domain,DC=local")
+  -dmsa-name <NAME>     Name of dMSA account to add or delete (e.g. "dmsa_svc")
+  -target-account <ACC> Predecessor user or computer account to link (default: "Administrator")
+  -principals-allowed <USER> Username allowed to retrieve managed password
+  -dns-hostname <FQDN>  DNS hostname for the dMSA
+  -base-dn <DN>         Base DN for search (default: domain root DN)
+  -port <PORT>          LDAP port (default: 389, or 636)
+
+examples:
+  impacket-rs badsuccessor corp.local/user:pass@192.168.1.10 -action search
+  impacket-rs badsuccessor corp.local/user:pass@192.168.1.10 -action add -target-ou "OU=Workstations,DC=corp,DC=local" -dmsa-name dmsa_svc -target-account Administrator
+  impacket-rs badsuccessor corp.local/user:pass@192.168.1.10 -action delete -target-ou "OU=Workstations,DC=corp,DC=local" -dmsa-name dmsa_svc
+"#),
+        "keylistattack" => Some(r#"Description: Performs the KERB-KEY-LIST attack (MS-KILE) to dump domain user secrets without code execution using a compromised Read-Only Domain Controller (RODC) account key.
+
+usage: impacket-rs keylistattack [options] [target]
+
+positional arguments:
+  target: [[domain/]username[:password]@]<targetName or address>
+
+options:
+  -h, --help            show this help message and exit
+  -rodcNo <NO>          RODC account number (e.g. 20000, required)
+  -rodcKey <KEY>        RODC krbtgt AES256/AES128 key in hex (required)
+  -rodc-etype <ETYPE>   RODC key encryption type (18=AES256, 17=AES128, 23=RC4)
+  -t, -target <USER>    Specific target username or username:rid (e.g. victim:1103)
+  -tf <FILE>            File with target usernames to attack (one per line)
+  -domain <DOMAIN>      Active Directory domain name
+  -domain-sid <SID>     Domain SID (e.g. S-1-5-21-...)
+  -kdc <HOST>           KDC hostname or IP (default: target host)
+  -dc-ip <IP>           IP address of domain controller
+  -full                 Output all dumped encryption keys in addition to NT hash
+
+examples:
+  impacket-rs keylistattack contoso.com/jdoe:pass@dc01 -rodcNo 20000 -rodcKey 0123456789abcdef...
+  impacket-rs keylistattack -kdc dc01.contoso.com -domain contoso.com -t victim:1103 -rodcNo 20000 -rodcKey 0123456789abcdef...
+  impacket-rs keylistattack -kdc dc01 -domain contoso.com -tf targetfile.txt -rodcNo 20000 -rodcKey 0123456789abcdef... -full
 "#),
         "atexec" => Some(r#"Description: Executes remote commands via the Microsoft Task Scheduler service (MS-TSCH over \PIPE\atsvc). Creates, triggers, and deletes a scheduled task, retrieving command output over SMB.
 
@@ -416,6 +464,21 @@ options:
 
 examples:
   impacket-rs compat-matrix
+"#),
+        "completions" => Some(r#"Description: Generates shell auto-completion scripts for Bash, Zsh, Fish, or PowerShell.
+
+usage: impacket-rs completions <bash|zsh|fish|powershell>
+
+positional arguments:
+  shell: Target shell to generate auto-completion for (bash, zsh, fish, powershell)
+
+options:
+  -h, --help            show this help message and exit
+
+examples:
+  source <(impacket-rs completions bash)
+  impacket-rs completions zsh > ~/.zsh/completion/_impacket-rs
+  impacket-rs completions fish > ~/.config/fish/completions/impacket-rs.fish
 "#),
         "dacledit" => Some(r#"Description: Inspects and modifies Active Directory DACL permissions via LDAP (e.g. GenericAll, WriteDacl).
 
@@ -706,6 +769,26 @@ options:
 
 examples:
   impacket-rs dpapi -blob credential.blob -masterkey masterkey.key
+"#),
+        "dpapidump" => Some(r#"Description: Automates extraction of Windows DPAPI credentials and MasterKeys for the SYSTEM user on a remote host.
+
+usage: impacket-rs dpapidump [options] <target>
+
+positional arguments:
+  target: [[domain/]username[:password]@]<targetName or address>
+
+options:
+  -h, --help            show this help message and exit
+  -hashes <LM:NT>       NTLM hashes for authentication
+  -key <HEX>            Pre-extracted DPAPI_SYSTEM user/machine key (skips remote LSA extraction)
+  -bootkey <HEX>        Syskey / bootkey in hex (skips remote SYSTEM hive extraction)
+  -share <SHARE>        SMB share to access filesystem (default: C$)
+  -cred-path <PATH>     Custom directory path to scan for Credential files
+
+examples:
+  impacket-rs dpapidump administrator:Password123@192.168.1.10
+  impacket-rs dpapidump corp.local/admin@dc01 -hashes :31d6cfe0d16ae931b73c59d7e0c089c0
+  impacket-rs dpapidump admin@target -key 0123456789abcdef...
 "#),
         "esentutl" => Some(r#"Description: Inspects and dumps Extensible Storage Engine (ESE / JET Blue) database tables and catalog metadata (e.g. NTDS.DIT).
 
@@ -2037,6 +2120,12 @@ pub fn canonicalize_name(name: &str) -> &'static str {
         "gmsa" => "getGMSAPassword",
         "checkldapstatus" => "CheckLDAPStatus",
         "addcomputer" => "addcomputer",
+        "badsuccessor" => "badsuccessor",
+        "bad-successor" => "badsuccessor",
+        "dmsa" => "badsuccessor",
+        "keylistattack" => "keylistattack",
+        "keylistdump" => "keylistattack",
+        "keylist" => "keylistattack",
         "dacledit" => "dacledit",
         "owneredit" => "owneredit",
         "dnstool" => "dnstool",
@@ -2078,6 +2167,8 @@ pub fn canonicalize_name(name: &str) -> &'static str {
         "ntdsdump" => "ntdsdump",
         "esentutl" => "esentutl",
         "dpapi" => "dpapi",
+        "dpapidump" => "dpapidump",
+        "dpapi-dump" => "dpapidump",
         "backupkey" => "backupkey",
         "backupkeys" => "backupkey",
         "bkrp" => "backupkey",
@@ -2091,6 +2182,8 @@ pub fn canonicalize_name(name: &str) -> &'static str {
         "split" => "split",
         "atq" => "atq",
         "eventlog" => "eventlog",
+        "completions" => "completions",
+        "completion" => "completions",
         "compatmatrix" => "compat-matrix",
         "parsetarget" => "parse-target",
         "ntlmhash" => "ntlm-hash",
@@ -2141,11 +2234,12 @@ mod tests {
             "wspsearch", "rdp_check", "registry-read", "tstool", "ping",
             "tracer", "sniffer", "mqtt_check", "klist", "attrib", "filetime",
             "mssqlinstance", "checkMSSQLStatus", "DumpNTLMInfo", "ntdsdump",
-            "esentutl", "dpapi", "backupkey", "describeTicket", "getPac", "rbcd",
+            "esentutl", "dpapi", "dpapidump", "backupkey", "describeTicket", "getPac", "rbcd",
             "findDelegation", "trueTree", "raiseChild", "smbpasswd", "split",
             "atq", "eventlog", "compat-matrix", "parse-target", "ntlm-hash",
             "krb5-asreq", "smb-negotiate", "rpc-interfaces", "bench-ndr",
             "secretsdump-local", "regsecrets", "netfiles", "smbserver", "smbexec", "dcomexec",
+            "completions", "badsuccessor", "keylistattack",
         ];
         for tool in tools {
             let help = get_tool_help(tool);
