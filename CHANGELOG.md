@@ -23,7 +23,17 @@ This project follows **Semantic Versioning 2.0.0 (SemVer)** and the exact change
 
 ## [Unreleased]
 
-1. RFC 8009 Kerberos Ciphers & Windows Server 2025 Cryptography Suite
+1. RODC Kerberos Key List Attack Engine (`keylistattack` / `MS-KILE`)
+
+    * **RODC Credential Extraction Engine (`crates/impacket-krb5::keylist`)**:
+        * Implemented MS-KILE Section 3.3.5.6.4 and issue #1667 partial TGT forging with embedded `PAC_LOGON_INFO`, `PAC_CLIENT_INFO_TYPE`, `PAC_ATTRIBUTES_INFO` (flags=1), and `PAC_REQUESTOR_INFO` (SID binding required by CVE-2021-42287 patched DCs).
+        * Supported `kvno = rodc_no << 16` and dual-signature verification using the RODC account's AES or RC4 key.
+        * Implemented `KERB-KEY-LIST-REQ` (PA-DATA 161) in `Krb5TgsReq` and ASN.1 `KERB-KEY-LIST-REP` (PA-DATA 162) extraction from decrypted `EncTGSRepPart` in `Krb5TgsRep`, correctly resolving type 162 regardless of ordering alongside modern `PA-SUPPORTED-ENCTYPES` (165).
+    * **Active Directory RODC Dumper CLI (`bins/impacket-rs`)**:
+        * Added `keylistattack` (with `keylistdump` alias) CLI tool supporting automated target user enumeration via MS-SAMR (filtering Denied RODC Password Replication Group RID 572), single target `-t`, or bulk target file `-tf`.
+        * Integrated shell auto-completions and detailed tool documentation.
+
+2. RFC 8009 Kerberos Ciphers & Windows Server 2025 Cryptography Suite
 
     * **Pure-Rust SHA-384 & HMAC-SHA384 Primitives (`crates/impacket-crypto`)**:
         * Implemented FIPS 180-4 **SHA-384** digest, RFC 4231 **HMAC-SHA384**, and RFC 2898 **PBKDF2-HMAC-SHA384** without external C or OpenSSL dependencies.

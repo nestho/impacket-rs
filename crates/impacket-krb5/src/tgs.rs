@@ -31,6 +31,8 @@ pub struct Krb5TgsReq {
     pub additional_tickets: Vec<Vec<u8>>,
     /// RFC 4120 §3.7 Kerberos User-to-User (U2U) flag (`ENC-TICKET-IN-SKEY`).
     pub u2u: bool,
+    /// MS-KILE §2.2.1 `KERB-KEY-LIST-REQ` (PA-DATA 161) requested encryption types.
+    pub key_list_etypes: Option<Vec<i32>>,
 }
 
 impl Krb5TgsReq {
@@ -65,7 +67,14 @@ impl Krb5TgsReq {
             s4u2self_user: None,
             additional_tickets: Vec::new(),
             u2u: false,
+            key_list_etypes: None,
         }
+    }
+
+    /// Configures KERB-KEY-LIST-REQ (type 161) requested encryption types (MS-KILE).
+    pub fn with_key_list(&mut self, requested_etypes: Vec<i32>) -> &mut Self {
+        self.key_list_etypes = Some(requested_etypes);
+        self
     }
 
     /// Configures User-to-User (U2U) authentication per RFC 4120 §3.7.
@@ -196,6 +205,21 @@ impl Krb5TgsReq {
             ]);
             padata_elements.push(padata_s4u);
         }
+
+        // KERB-KEY-LIST-REQ (161) per MS-KILE
+        if let Some(ref kl_etypes) = self.key_list_etypes {
+            let etype_integers: Vec<Vec<u8>> = kl_etypes
+                .iter()
+                .map(|&e| der::encode_integer(e as i64))
+                .collect();
+            let kl_seq = der::encode_sequence(&etype_integers);
+            let padata_kl = der::encode_sequence(&[
+                der::encode_context_explicit(1, &der::encode_integer(161)),
+                der::encode_context_explicit(2, &der::encode_octet_string(&kl_seq)),
+            ]);
+            padata_elements.push(padata_kl);
+        }
+
         let padata_seq = der::encode_sequence(&padata_elements);
 
         // KDC-REQ-BODY
@@ -531,6 +555,124 @@ impl Krb5TgsRep {
         }
 
         Ok((key_type, key_value))
+    }
+
+    /// Decrypts the TGS-REP `enc-part` and extracts dumped keys from `KERB-KEY-LIST-REP` (PA-DATA 162).
+    ///
+    /// Per MS-KILE §2.2.2 and issue #1667, `encrypted-pa-data` can contain multiple elements in any order
+    /// (e.g., `PA-SUPPORTED-ENCTYPES` at index 0). This method searches specifically for `padata-type == 162`.
+    pub fn extract_key_list(
+        &self,
+        tgt_session_key: &[u8],
+        tgt_etype: i32,
+    ) -> Result<Vec<(i32, Vec<u8>)>, CoreError> {
+        let pt = match tgt_etype {
+            23 => {
+                let k16: [u8; 16] = tgt_session_key.try_into().map_err(|_| {
+                    CoreError::ProtocolError("RC4 key must be 16 bytes".into())
+                })?;
+                crate::crypto::rc4_hmac_decrypt(&k16, 8, &self.rep_enc_cipher)?
+            }
+            17 => {
+                let k16: [u8; 16] = tgt_session_key.try_into().map_err(|_| {
+                    CoreError::ProtocolError("AES-128 key must be 16 bytes".into())
+                })?;
+                crate::crypto::aes128_cts_hmac_sha1_96_decrypt(&k16, 8, &self.rep_enc_cipher)?
+            }
+            18 => {
+                let k32: [u8; 32] = tgt_session_key.try_into().map_err(|_| {
+                    CoreError::ProtocolError("AES-256 key must be 32 bytes".into())
+                })?;
+                crate::crypto::aes256_cts_hmac_sha1_96_decrypt(&k32, 8, &self.rep_enc_cipher)?
+            }
+            19 => {
+                let k16: [u8; 16] = tgt_session_key.try_into().map_err(|_| {
+                    CoreError::ProtocolError("AES-128-SHA2 key must be 16 bytes".into())
+                })?;
+                crate::crypto::aes128_cts_hmac_sha256_128_decrypt(&k16, 8, &self.rep_enc_cipher)?
+            }
+            20 => {
+                let k32: [u8; 32] = tgt_session_key.try_into().map_err(|_| {
+                    CoreError::ProtocolError("AES-256-SHA2 key must be 32 bytes".into())
+                })?;
+                crate::crypto::aes256_cts_hmac_sha384_192_decrypt(&k32, 8, &self.rep_enc_cipher)?
+            }
+            other => {
+                return Err(CoreError::ProtocolError(format!(
+                    "Unsupported TGS key etype {}",
+                    other
+                )));
+            }
+        };
+
+        // Parse EncTGSRepPart ([APPLICATION 26])
+        let (app_tag, app_body, _) = der::decode_tlv(&pt)?;
+        let enc_body = if app_tag == 0x7A {
+            let (_, body, _) = der::decode_tlv(app_body)?;
+            body
+        } else {
+            app_body
+        };
+
+        let mut rem = enc_body;
+        while !rem.is_empty() {
+            let (tag, val, next) = der::decode_tlv(rem)?;
+            rem = next;
+            // encrypted-pa-data is tag [12] in EncKDCRepPart
+            if (tag & 0x1F) == 12 {
+                let (_, mut pa_seq, _) = der::decode_tlv(val)?;
+                while !pa_seq.is_empty() {
+                    let (_, pa_elem, next_pa) = der::decode_tlv(pa_seq)?;
+                    pa_seq = next_pa;
+                    let mut pa_type = 0i64;
+                    let mut pa_value = Vec::new();
+                    let mut pa_rem = pa_elem;
+                    while !pa_rem.is_empty() {
+                        let (ptag, pval, pnext) = der::decode_tlv(pa_rem)?;
+                        pa_rem = pnext;
+                        match ptag & 0x1F {
+                            1 => pa_type = der::decode_integer(pval)?,
+                            2 => {
+                                let (_, octets, _) = der::decode_tlv(pval)?;
+                                pa_value = octets.to_vec();
+                            }
+                            _ => {}
+                        }
+                    }
+
+                    if pa_type == 162 {
+                        // KERB-KEY-LIST-REP ::= SEQUENCE OF EncryptionKey
+                        let mut keys = Vec::new();
+                        let (_, mut keys_seq, _) = der::decode_tlv(&pa_value)?;
+                        while !keys_seq.is_empty() {
+                            let (_, k_elem, next_k) = der::decode_tlv(keys_seq)?;
+                            keys_seq = next_k;
+                            let mut ktype = 0i64;
+                            let mut kval = Vec::new();
+                            let mut k_rem = k_elem;
+                            while !k_rem.is_empty() {
+                                let (ktag, kv, knext) = der::decode_tlv(k_rem)?;
+                                k_rem = knext;
+                                match ktag & 0x1F {
+                                    0 => ktype = der::decode_integer(kv)?,
+                                    1 => {
+                                        let (_, octets, _) = der::decode_tlv(kv)?;
+                                        kval = octets.to_vec();
+                                    }
+                                    _ => {}
+                                }
+                            }
+                            keys.push((ktype as i32, kval));
+                        }
+                        return Ok(keys);
+                    }
+                }
+            }
+        }
+
+        Err(CoreError::ProtocolError(
+            "KDC response does not contain KERB-KEY-LIST-REP (type 162)".into(),
+        ))
     }
 
     /// Converts this ticket into a `.ccache` container with a single service ticket.

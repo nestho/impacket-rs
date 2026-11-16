@@ -296,6 +296,31 @@ examples:
   impacket-rs badsuccessor corp.local/user:pass@192.168.1.10 -action add -target-ou "OU=Workstations,DC=corp,DC=local" -dmsa-name dmsa_svc -target-account Administrator
   impacket-rs badsuccessor corp.local/user:pass@192.168.1.10 -action delete -target-ou "OU=Workstations,DC=corp,DC=local" -dmsa-name dmsa_svc
 "#),
+        "keylistattack" => Some(r#"Description: Performs the KERB-KEY-LIST attack (MS-KILE) to dump domain user secrets without code execution using a compromised Read-Only Domain Controller (RODC) account key.
+
+usage: impacket-rs keylistattack [options] [target]
+
+positional arguments:
+  target: [[domain/]username[:password]@]<targetName or address>
+
+options:
+  -h, --help            show this help message and exit
+  -rodcNo <NO>          RODC account number (e.g. 20000, required)
+  -rodcKey <KEY>        RODC krbtgt AES256/AES128 key in hex (required)
+  -rodc-etype <ETYPE>   RODC key encryption type (18=AES256, 17=AES128, 23=RC4)
+  -t, -target <USER>    Specific target username or username:rid (e.g. victim:1103)
+  -tf <FILE>            File with target usernames to attack (one per line)
+  -domain <DOMAIN>      Active Directory domain name
+  -domain-sid <SID>     Domain SID (e.g. S-1-5-21-...)
+  -kdc <HOST>           KDC hostname or IP (default: target host)
+  -dc-ip <IP>           IP address of domain controller
+  -full                 Output all dumped encryption keys in addition to NT hash
+
+examples:
+  impacket-rs keylistattack contoso.com/jdoe:pass@dc01 -rodcNo 20000 -rodcKey 0123456789abcdef...
+  impacket-rs keylistattack -kdc dc01.contoso.com -domain contoso.com -t victim:1103 -rodcNo 20000 -rodcKey 0123456789abcdef...
+  impacket-rs keylistattack -kdc dc01 -domain contoso.com -tf targetfile.txt -rodcNo 20000 -rodcKey 0123456789abcdef... -full
+"#),
         "atexec" => Some(r#"Description: Executes remote commands via the Microsoft Task Scheduler service (MS-TSCH over \PIPE\atsvc). Creates, triggers, and deletes a scheduled task, retrieving command output over SMB.
 
 usage: impacket-rs atexec [options] <target> [command]
@@ -2078,6 +2103,9 @@ pub fn canonicalize_name(name: &str) -> &'static str {
         "badsuccessor" => "badsuccessor",
         "bad-successor" => "badsuccessor",
         "dmsa" => "badsuccessor",
+        "keylistattack" => "keylistattack",
+        "keylistdump" => "keylistattack",
+        "keylist" => "keylistattack",
         "dacledit" => "dacledit",
         "owneredit" => "owneredit",
         "dnstool" => "dnstool",
@@ -2189,7 +2217,7 @@ mod tests {
             "atq", "eventlog", "compat-matrix", "parse-target", "ntlm-hash",
             "krb5-asreq", "smb-negotiate", "rpc-interfaces", "bench-ndr",
             "secretsdump-local", "regsecrets", "netfiles", "smbserver", "smbexec", "dcomexec",
-            "completions", "badsuccessor",
+            "completions", "badsuccessor", "keylistattack",
         ];
         for tool in tools {
             let help = get_tool_help(tool);

