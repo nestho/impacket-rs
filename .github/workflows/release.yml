@@ -80,3 +80,19 @@ jobs:
         run: |
           tar -czf "impacket-rs-${{ matrix.target }}.tar.gz" -C "target/${{ matrix.target }}/release" "${{ matrix.bin_name }}"
           gh release upload "${{ github.ref_name }}" "impacket-rs-${{ matrix.target }}.tar.gz" --clobber
+
+      - name: Build and upload Debian package
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          DEB_DIR="impacket-rs_${VERSION}_amd64"
+          mkdir -p "${DEB_DIR}/DEBIAN" "${DEB_DIR}/usr/bin" "${DEB_DIR}/usr/include" "${DEB_DIR}/usr/share/doc/impacket-rs"
+          install -m 755 "target/${{ matrix.target }}/release/${{ matrix.bin_name }}" "${DEB_DIR}/usr/bin/impacket-rs"
+          install -m 644 crates/impacket-cabi/include/impacket.h "${DEB_DIR}/usr/include/impacket.h"
+          install -m 644 packaging/debian/copyright "${DEB_DIR}/usr/share/doc/impacket-rs/copyright"
+          cat packaging/debian/control | sed "s/Version:.*/Version: ${VERSION}/" > "${DEB_DIR}/DEBIAN/control"
+          dpkg-deb --build --root-owner-group "${DEB_DIR}"
+          gh release upload "${{ github.ref_name }}" "${DEB_DIR}.deb" --clobber
