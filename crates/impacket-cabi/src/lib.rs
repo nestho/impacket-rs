@@ -459,7 +459,7 @@ mod tests {
         let v = impacket_version();
         assert!(!v.is_null());
         let s = unsafe { CStr::from_ptr(v).to_str().unwrap() };
-        assert_eq!(s, "0.3.0");
+        assert_eq!(s, env!("CARGO_PKG_VERSION"));
     }
 
     #[test]

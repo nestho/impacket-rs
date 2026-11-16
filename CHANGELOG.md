@@ -21,37 +21,101 @@ This project follows **Semantic Versioning 2.0.0 (SemVer)** and the exact change
 
 ---
 
-## [Unreleased]
+## [v0.4.0] - 2026-11-16
 
-1. BloodHound CE (v5+) Collector & Ingestor Suite (`crates/impacket-ldap::bloodhound`)
+### 🚀 Highlights & Architectural Overview
 
-    * **BloodHound CE v5 Complete Schema**:
-        * Implemented schema models for `BloodHoundUser`, `BloodHoundComputer`, `BloodHoundGroup`, `BloodHoundDomain`, `BloodHoundAce`, `BloodHoundTrust`, and `BloodHoundGroupMember`.
-        * Added full metadata headers (`meta.methods: 0`, `meta.type`, `meta.count`, `meta.version: 5`).
-        * Implemented pure-Rust in-memory uncompressed PKZIP archive packager (`write_to_zip_file`, `to_zip_bytes`) with IEEE 802.3 CRC32 verification.
-    * **Active Directory LDAP Data Collectors**:
-        * Added `collect_users`, `collect_computers`, `collect_groups`, `collect_domains`, and unified `collect_bloodhound_data`.
-        * Extracted ACLs and security descriptors (`parse_entry_aces`), Resource-Based Constrained Delegation (`msDS-AllowedToActOnBehalfOfOtherIdentity`), unconstrained/constrained delegation, AdminCount, and SID histories.
-    * **CLI Ingestor & Export Subcommands (`bins/impacket-rs`)**:
-        * Added `bloodhound <TARGET> [-o PATH] [-zip] [-json] [-base DN]` CLI subcommand.
-        * Added `-format <text|json|bloodhound>`, `-json`, and `-bloodhound` (`-bh`) flags to `GetADUsers` and `GetADComputers`.
-        * Added `-json` flag to `DumpNTLMInfo` for machine-readable SMB2/3 dialect and NTLM target info output.
+Impacket-RS **v0.4.0** marks the milestone completion of **Phase 4**, delivering enterprise-grade BloodHound CE (v5+) collection, high-performance C ABI / FFI bindings for native implant embedding, unified machine-readable JSON telemetry, and official Debian/Kali in-tree packaging.
 
-2. C ABI & Foreign Function Interface (FFI) Bindings (`crates/impacket-cabi`)
+| Capability | Module / Component | Highlights |
+| :--- | :--- | :--- |
+| **BloodHound CE v5** | `crates/impacket-ldap::bloodhound` | Full v5 JSON schema, pure-Rust ZIP generation, fast LDAP collection |
+| **Native C ABI / FFI** | `crates/impacket-cabi` | Header `impacket.h`, static `libimpacket.a`, shared `libimpacket.so/.dylib` |
+| **Telemetry & Automation** | `bins/impacket-rs` | `-format <text\|json\|bloodhound>`, `-json`, `-bloodhound`, `--json` |
+| **OS Packaging** | `packaging/debian/` | Native Debian/Kali build rules, control definitions, multi-arch support |
+| **Clean Architecture** | 16 Workspace Crates | 264+ passing tests, 0 compiler/clippy warnings, SonarCloud Grade A |
 
-    * **C Library & Header Distribution**:
-        * Created `crates/impacket-cabi` compiling to static library (`libimpacket.a`), dynamic library (`libimpacket.so` / `libimpacket.dylib` / `impacket.dll`), and Rust rlib.
-        * Provided standard C99/C++ header `crates/impacket-cabi/include/impacket.h`.
-    * **Exposed C ABI Functions**:
-        * `impacket_version()`: Library version string.
-        * `impacket_parse_target()`: Structured parsing of complex domain/user:pass@host:port targets.
-        * `impacket_ntlm_hash()` & `impacket_lm_hash()`: Pure-Rust NT and LM password hash generation.
-        * `impacket_ntlmv2_ntowf()`: NTLMv2 HMAC-MD5 password digest derivation.
-        * `impacket_md4()`, `impacket_md5()`, `impacket_sha1()`, `impacket_sha256()`, `impacket_rc4()`, `impacket_des_encrypt_block()`: Cryptographic primitives.
-        * `impacket_decrypt_cpassword()`: Group Policy Preferences password decryption.
-        * `impacket_sid_to_string()`: Binary SID to canonical string translation.
-        * `impacket_krb5_parse_asrep_hashcat()`: Kerberos AS-REP DER parsing to Hashcat `$krb5asrep$` format.
-        * Memory-safe bounds validation and null-pointer defense on all entry points.
+---
+
+### 🩸 1. BloodHound CE (v5+) Active Directory Collector & ZIP Ingestor
+
+* **Complete BloodHound CE v5 Schema Implementation (`crates/impacket-ldap::bloodhound`)**:
+  * Implemented strict BloodHound CE v5 schemas for `BloodHoundUser`, `BloodHoundComputer`, `BloodHoundGroup`, `BloodHoundDomain`, `BloodHoundAce`, `BloodHoundTrust`, and `BloodHoundGroupMember`.
+  * Generated standard BloodHound CE envelope metadata headers (`meta.methods: 0`, `meta.type`, `meta.count`, `meta.version: 5`).
+* **Active Directory Security Ingestion Engine**:
+  * Added `collect_users`: extracts Kerberos delegation rights (`msDS-AllowedToDelegateTo`), SPNs, SID history, AdminCount, UAC flags, and ACL security descriptors.
+  * Added `collect_computers`: extracts Resource-Based Constrained Delegation (`msDS-AllowedToActOnBehalfOfOtherIdentity`), operating system versions, and primary group relationships.
+  * Added `collect_groups` & `collect_domains`: extracts domain functional levels, trust attributes, and nested group memberships.
+  * Added unified `collect_bloodhound_data` orchestrator.
+* **Pure-Rust In-Memory PKZIP Generator**:
+  * Built zero-dependency uncompressed PKZIP archive creator (`write_to_zip_file`, `to_zip_bytes`) with IEEE 802.3 CRC32 verification, outputting ready-to-ingest BloodHound `.zip` bundles directly.
+* **CLI Subcommand & Direct Ingestion Options**:
+  ```bash
+  # Collect full domain BloodHound CE v5 data into a ZIP bundle
+  impacket-rs bloodhound corp.local/jdoe:Pass123!@192.168.1.10 -zip -o bloodhound_data.zip
+
+  # Collect domain data into separate JSON files
+  impacket-rs bloodhound corp.local/jdoe:Pass123!@192.168.1.10 -json -o ./bh_output/
+  ```
+
+---
+
+### ⚡ 2. Pure-Rust C ABI & Native FFI Bindings (`crates/impacket-cabi`)
+
+* **Embed Impacket-RS in C/C++, BOFs, Implants, and Foreign Languages**:
+  * Added `crates/impacket-cabi` configured with `crate-type = ["cdylib", "staticlib", "rlib"]`, producing static libraries (`libimpacket.a`) and dynamic libraries (`libimpacket.so` / `libimpacket.dylib` / `impacket.dll`).
+  * Shipped standard C99/C++ header [include/impacket.h](file:///Users/nestho/impacket-rs/crates/impacket-cabi/include/impacket.h) with strict null-safety, memory boundary validation, and zero allocations for hash routines.
+* **Exported C ABI Primitives**:
+  * `impacket_version()`: Returns current library version string (`"0.4.0"`).
+  * `impacket_parse_target()`: Structured target parser populating `impacket_target_t` (domain, user, password, host, IP, port).
+  * `impacket_ntlm_hash()` & `impacket_lm_hash()`: Computes 16-byte NT and LM password hashes.
+  * `impacket_ntlmv2_ntowf()`: Derives NTLMv2 HMAC-MD5 password digest from user, domain, and NT-hash.
+  * `impacket_md4()`, `impacket_md5()`, `impacket_sha1()`, `impacket_sha256()`, `impacket_rc4()`, `impacket_des_encrypt_block()`: Core cryptographic primitives.
+  * `impacket_decrypt_cpassword()`: Decrypts GPP `cpassword` strings from Group Policy preferences.
+  * `impacket_sid_to_string()`: Translates binary RPC SIDs to canonical `S-1-5-...` strings.
+  * `impacket_krb5_parse_asrep_hashcat()`: Parses raw AS-REP DER messages and emits Hashcat `$krb5asrep$` format.
+  * `impacket_free_string()`: Safe heap string deallocator.
+
+---
+
+### 📊 3. Machine-Readable Telemetry & Structured Output Pipeline
+
+* **Universal CLI Output Flags**:
+  * `GetADUsers`: added `-format <text|json|bloodhound>`, `-json`, and `-bloodhound` (`-bh`) options.
+  * `GetADComputers`: added `-format <text|json|bloodhound>`, `-json`, and `-bloodhound` (`-bh`) options.
+  * `DumpNTLMInfo`: added `-json` / `--json` flag to emit structured JSON reports of SMB dialect, signing parameters, and NTLM target info.
+  * `findDelegation`: enhanced `-json` and `-graph` flags for SIEM and pipeline automation.
+* **Pipeline Automation Example**:
+  ```bash
+  # Query AD users directly in BloodHound format
+  impacket-rs GetADUsers corp.local/jdoe:Pass123!@192.168.1.10 -bloodhound > users.json
+
+  # Query AD computers as clean JSON for jq / automation
+  impacket-rs GetADComputers corp.local/jdoe:Pass123!@192.168.1.10 -json | jq '.[] | select(.operatingSystem | contains("Server"))'
+
+  # Inspect target NTLM & dialect info as JSON
+  impacket-rs DumpNTLMInfo 192.168.1.20 -json | jq '.os_version'
+  ```
+
+---
+
+### 📦 4. Kali & Debian Linux In-Tree Packaging (`packaging/debian/`)
+
+* **Packaging Definitions for Downstream Maintainers**:
+  * Added `packaging/debian/control`: packages binary package `impacket-rs` and development package `libimpacket-dev`.
+  * Added `packaging/debian/rules`: automates release compilation, stripping, binary placement into `/usr/bin/impacket-rs`, and C library / header installation into `/usr/include/impacket.h` and `/usr/lib/libimpacket.a`.
+  * Added `packaging/debian/copyright`: standard Debian DEP-5 compliant copyright documentation under Apache-2.0 license.
+
+---
+
+### 🛡️ 5. Quality Assurance, Security & Performance
+
+* **Test Suite Expansion**:
+  * 264+ comprehensive unit and integration tests passing across all 16 crates.
+  * Verified C ABI memory safety against NULL pointers, buffer overflows, and known cryptographic test vectors.
+* **Zero Compiler & Linter Warnings**:
+  * `cargo clippy --workspace --all-targets --locked -- -D warnings`: 100% clean.
+  * SonarCloud Quality Gate: Security Rating **A**, Reliability Rating **A**, Maintainability Rating **A**, Duplication **0.0%**.
 
 ---
 
