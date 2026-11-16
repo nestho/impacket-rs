@@ -89,10 +89,13 @@ jobs:
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           DEB_DIR="impacket-rs_${VERSION}_amd64"
+          BIN_PATH="target/${{ matrix.target }}/release/${{ matrix.bin_name }}"
+          BIN_SIZE_KB=$(du -k "${BIN_PATH}" | cut -f1)
           mkdir -p "${DEB_DIR}/DEBIAN" "${DEB_DIR}/usr/bin" "${DEB_DIR}/usr/include" "${DEB_DIR}/usr/share/doc/impacket-rs"
-          install -m 755 "target/${{ matrix.target }}/release/${{ matrix.bin_name }}" "${DEB_DIR}/usr/bin/impacket-rs"
+          install -m 755 "${BIN_PATH}" "${DEB_DIR}/usr/bin/impacket-rs"
           install -m 644 crates/impacket-cabi/include/impacket.h "${DEB_DIR}/usr/include/impacket.h"
           install -m 644 packaging/debian/copyright "${DEB_DIR}/usr/share/doc/impacket-rs/copyright"
-          cat packaging/debian/control | sed "s/Version:.*/Version: ${VERSION}/" > "${DEB_DIR}/DEBIAN/control"
+          sed "s/@VERSION@/${VERSION}/g" packaging/debian/control.template > "${DEB_DIR}/DEBIAN/control"
+          echo "Installed-Size: ${BIN_SIZE_KB}" >> "${DEB_DIR}/DEBIAN/control"
           dpkg-deb --build --root-owner-group "${DEB_DIR}" "impacket-rs-${{ matrix.target }}.deb"
           gh release upload "${{ github.ref_name }}" "impacket-rs-${{ matrix.target }}.deb" --clobber
