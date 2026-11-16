@@ -1,0 +1,22 @@
+#!/usr/bin/make -f
+
+export DH_VERBOSE = 1
+
+%:
+	dh $@
+
+override_dh_auto_build:
+	cargo build --release --locked --workspace
+
+override_dh_auto_test:
+	cargo test --release --locked --workspace
+
+override_dh_auto_install:
+	install -d debian/impacket-rs/usr/bin
+	install -m 755 target/release/impacket-rs debian/impacket-rs/usr/bin/impacket-rs
+	install -d debian/libimpacket-dev/usr/include
+	install -m 644 crates/impacket-cabi/include/impacket.h debian/libimpacket-dev/usr/include/impacket.h
+	install -d debian/libimpacket-dev/usr/lib
+	if [ -f target/release/libimpacket_cabi.a ]; then \
+		install -m 644 target/release/libimpacket_cabi.a debian/libimpacket-dev/usr/lib/libimpacket.a; \
+	fi
