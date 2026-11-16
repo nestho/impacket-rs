@@ -1312,6 +1312,153 @@ pub fn sha512(input: &[u8]) -> [u8; 64] {
     out
 }
 
+/// Pure-Rust FIPS 180-4 SHA-384.
+pub fn sha384(input: &[u8]) -> [u8; 48] {
+    const K: [u64; 80] = [
+        0x428a2f98d728ae22, 0x7137449123ef65cd, 0xb5c0fbcfec4d3b2f, 0xe9b5dba58189dbbc,
+        0x3956c25bf348b538, 0x59f111f1b605d019, 0x923f82a4af194f9b, 0xab1c5ed5da6d8118,
+        0xd807aa98a3030242, 0x12835b0145706fbe, 0x243185be4ee4b28c, 0x550c7dc3d5ffb4e2,
+        0x72be5d74f27b896f, 0x80deb1fe3b1696b1, 0x9bdc06a725c71235, 0xc19bf174cf692694,
+        0xe49b69c19ef14ad2, 0xefbe4786384f25e3, 0x0fc19dc68b8cd5b5, 0x240ca1cc77ac9c65,
+        0x2de92c6f592b0275, 0x4a7484aa6ea6e483, 0x5cb0a9dcbd41fbd4, 0x76f988da831153b5,
+        0x983e5152ee66dfab, 0xa831c66d2db43210, 0xb00327c898fb213f, 0xbf597fc7beef0ee4,
+        0xc6e00bf33da88fc2, 0xd5a79147930aa725, 0x06ca6351e003826f, 0x142929670a0e6e70,
+        0x27b70a8546d22ffc, 0x2e1b21385c26c926, 0x4d2c6dfc5ac42aed, 0x53380d139d95b3df,
+        0x650a73548baf63de, 0x766a0abb3c77b2a8, 0x81c2c92e47edaee6, 0x92722c851482353b,
+        0xa2bfe8a14cf10364, 0xa81a664bbc423001, 0xc24b8b70d0f89791, 0xc76c51a30654be30,
+        0xd192e819d6ef5218, 0xd69906245565a910, 0xf40e35855771202a, 0x106aa07032bbd1b8,
+        0x19a4c116b8d2d0c8, 0x1e376c085141ab53, 0x2748774cdf8eeb99, 0x34b0bcb5e19b48a8,
+        0x391c0cb3c5c95a63, 0x4ed8aa4ae3418acb, 0x5b9cca4f7763e373, 0x682e6ff3d6b2b8a3,
+        0x748f82ee5defb2fc, 0x78a5636f43172f60, 0x84c87814a1f0ab72, 0x8cc702081a6439ec,
+        0x90befffa23631e28, 0xa4506cebde82bde9, 0xbef9a3f7b2c67915, 0xc67178f2e372532b,
+        0xca273eceea26619c, 0xd186b8c721c0c207, 0xeada7dd6cde0eb1e, 0xf57d4f7fee6ed178,
+        0x06f067aa72176fba, 0x0a637dc5a2c898a6, 0x113f9804bef90dae, 0x1b710b35131c471b,
+        0x28db77f523047d84, 0x32caab7b40c72493, 0x3c9ebe0a15c9bebc, 0x431d67c49c100d4c,
+        0x4cc5d4becb3e42b6, 0x597f299cfc657e2a, 0x5fcb6fab3ad6faec, 0x6c44198c4a475817,
+    ];
+    let mut h: [u64; 8] = [
+        0xcbbb9d5dc1059ed8, 0x629a292a367cd507, 0x9159015a3070dd17, 0x152fecd8f70e5939,
+        0x67332667ffc00b31, 0x8eb44a8768581511, 0xdb0c2e0d64f98fa7, 0x47b5481dbefa4fa4,
+    ];
+
+    let bit_len = (input.len() as u128) * 8;
+    let mut padded = Vec::with_capacity(input.len() + 144);
+    padded.extend_from_slice(input);
+    padded.push(0x80);
+    while (padded.len() % 128) != 112 {
+        padded.push(0);
+    }
+    padded.extend_from_slice(&bit_len.to_be_bytes());
+
+    for chunk in padded.chunks_exact(128) {
+        let mut w = [0u64; 80];
+        for (i, word) in chunk.chunks_exact(8).enumerate() {
+            w[i] = u64::from_be_bytes(word.try_into().unwrap());
+        }
+        for i in 16..80 {
+            let s0 = w[i - 15].rotate_right(1) ^ w[i - 15].rotate_right(8) ^ (w[i - 15] >> 7);
+            let s1 = w[i - 2].rotate_right(19) ^ w[i - 2].rotate_right(61) ^ (w[i - 2] >> 6);
+            w[i] = w[i - 16]
+                .wrapping_add(s0)
+                .wrapping_add(w[i - 7])
+                .wrapping_add(s1);
+        }
+        let mut a = h[0];
+        let mut b = h[1];
+        let mut c = h[2];
+        let mut d = h[3];
+        let mut e = h[4];
+        let mut f = h[5];
+        let mut g = h[6];
+        let mut hh = h[7];
+        for i in 0..80 {
+            let s1 = e.rotate_right(14) ^ e.rotate_right(18) ^ e.rotate_right(41);
+            let ch = (e & f) ^ (!e & g);
+            let t1 = hh
+                .wrapping_add(s1)
+                .wrapping_add(ch)
+                .wrapping_add(K[i])
+                .wrapping_add(w[i]);
+            let s0 = a.rotate_right(28) ^ a.rotate_right(34) ^ a.rotate_right(39);
+            let maj = (a & b) ^ (a & c) ^ (b & c);
+            let t2 = s0.wrapping_add(maj);
+            hh = g;
+            g = f;
+            f = e;
+            e = d.wrapping_add(t1);
+            d = c;
+            c = b;
+            b = a;
+            a = t1.wrapping_add(t2);
+        }
+        h[0] = h[0].wrapping_add(a);
+        h[1] = h[1].wrapping_add(b);
+        h[2] = h[2].wrapping_add(c);
+        h[3] = h[3].wrapping_add(d);
+        h[4] = h[4].wrapping_add(e);
+        h[5] = h[5].wrapping_add(f);
+        h[6] = h[6].wrapping_add(g);
+        h[7] = h[7].wrapping_add(hh);
+    }
+    let mut out = [0u8; 48];
+    for (i, word) in h[..6].iter().enumerate() {
+        out[i * 8..i * 8 + 8].copy_from_slice(&word.to_be_bytes());
+    }
+    out
+}
+
+/// Pure-Rust RFC 4231 HMAC-SHA384.
+pub fn hmac_sha384(key: &[u8], data: &[u8]) -> [u8; 48] {
+    let mut k_block = [0u8; 128];
+    if key.len() > 128 {
+        k_block[..48].copy_from_slice(&sha384(key));
+    } else {
+        k_block[..key.len()].copy_from_slice(key);
+    }
+    let mut ipad = [0x36u8; 128];
+    let mut opad = [0x5cu8; 128];
+    for i in 0..128 {
+        ipad[i] ^= k_block[i];
+        opad[i] ^= k_block[i];
+    }
+    zeroize_slice(&mut k_block);
+
+    let mut inner = Vec::with_capacity(128 + data.len());
+    inner.extend_from_slice(&ipad);
+    inner.extend_from_slice(data);
+    let inner_hash = sha384(&inner);
+
+    let mut outer = Vec::with_capacity(176);
+    outer.extend_from_slice(&opad);
+    outer.extend_from_slice(&inner_hash);
+    sha384(&outer)
+}
+
+/// RFC 2898 PBKDF2 with HMAC-SHA384 pseudorandom function.
+pub fn pbkdf2_hmac_sha384(password: &[u8], salt: &[u8], iterations: u32, key_len: usize) -> Vec<u8> {
+    let mut out = Vec::with_capacity(key_len);
+    let mut block_index = 1u32;
+    while out.len() < key_len {
+        let mut u_prev = {
+            let mut init = Vec::with_capacity(salt.len() + 4);
+            init.extend_from_slice(salt);
+            init.extend_from_slice(&block_index.to_be_bytes());
+            hmac_sha384(password, &init)
+        };
+        let mut f_block = u_prev;
+        for _ in 1..iterations {
+            u_prev = hmac_sha384(password, &u_prev);
+            for i in 0..48 {
+                f_block[i] ^= u_prev[i];
+            }
+        }
+        let take = std::cmp::min(key_len - out.len(), 48);
+        out.extend_from_slice(&f_block[..take]);
+        block_index += 1;
+    }
+    out
+}
+
 /// Pure-Rust RFC 4231 HMAC-SHA256 (SMB 2.x message signing).
 pub fn hmac_sha256(key: &[u8], data: &[u8]) -> [u8; 32] {
     let mut k_block = [0u8; 64];
@@ -1851,5 +1998,20 @@ mod tests {
         // Deterministic output check
         let derived2 = sp800_108_counter_kdf(&key, label, &context, 32);
         assert_eq!(derived, derived2);
+    }
+
+    #[test]
+    fn test_sha384_and_hmac_sha384_vectors() {
+        let hash = sha384(b"test");
+        assert_eq!(
+            impacket_core::encode_hex(&hash),
+            "768412320f7b0aa5812fce428dc4706b3cae50e02a64caa16a782249bfe8efc4b7ef1ccb126255d196047dfedf17a0a9"
+        );
+
+        let hmac = hmac_sha384(b"key", b"The quick brown fox jumps over the lazy dog");
+        assert_eq!(hmac.len(), 48);
+
+        let pbkdf2 = pbkdf2_hmac_sha384(b"password", b"salt", 2, 32);
+        assert_eq!(pbkdf2.len(), 32);
     }
 }

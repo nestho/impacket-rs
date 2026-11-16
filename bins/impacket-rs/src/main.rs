@@ -6145,6 +6145,18 @@ pub fn parse_get_user_spns_options(args: &[String]) -> Result<GetUserSpnsOptions
                     "rc4" | "23" => requested_etypes = vec![KerberosEType::Rc4Hmac],
                     "aes128" | "17" => requested_etypes = vec![KerberosEType::Aes128CtsHmacSha1_96],
                     "aes256" | "18" => requested_etypes = vec![KerberosEType::Aes256CtsHmacSha1_96],
+                    "aes128-sha2" | "aes128-sha256" | "19" => {
+                        requested_etypes = vec![KerberosEType::Aes128CtsHmacSha256_128];
+                    }
+                    "aes256-sha2" | "aes256-sha384" | "20" => {
+                        requested_etypes = vec![KerberosEType::Aes256CtsHmacSha384_192];
+                    }
+                    "aes-sha2" => {
+                        requested_etypes = vec![
+                            KerberosEType::Aes256CtsHmacSha384_192,
+                            KerberosEType::Aes128CtsHmacSha256_128,
+                        ];
+                    }
                     "aes" => {
                         requested_etypes = vec![
                             KerberosEType::Aes256CtsHmacSha1_96,
@@ -6156,11 +6168,13 @@ pub fn parse_get_user_spns_options(args: &[String]) -> Result<GetUserSpnsOptions
                             KerberosEType::Rc4Hmac,
                             KerberosEType::Aes256CtsHmacSha1_96,
                             KerberosEType::Aes128CtsHmacSha1_96,
+                            KerberosEType::Aes256CtsHmacSha384_192,
+                            KerberosEType::Aes128CtsHmacSha256_128,
                         ];
                     }
                     other => {
                         return Err(format!(
-                            "Unknown Kerberos etype '{}' (expected: rc4, aes128, aes256, aes, all)",
+                            "Unknown Kerberos etype '{}' (expected: rc4, aes128, aes256, aes128-sha2, aes256-sha2, aes-sha2, aes, all)",
                             other
                         ));
                     }
@@ -14213,6 +14227,8 @@ mod tests {
                 KerberosEType::Rc4Hmac,
                 KerberosEType::Aes256CtsHmacSha1_96,
                 KerberosEType::Aes128CtsHmacSha1_96,
+                KerberosEType::Aes256CtsHmacSha384_192,
+                KerberosEType::Aes128CtsHmacSha256_128,
             ]
         );
 

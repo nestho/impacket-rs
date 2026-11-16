@@ -228,7 +228,7 @@ options:
   -request-user <USER>   Request TGS tickets targeting a specific user only
   -outputfile <FILE>     Output filename to write captured TGS hashes to
   -aes                   Request AES-256 and AES-128 tickets (Hashcat modes 19700/19600)
-  -etype <TYPE>          Kerberos encryption type: rc4, aes128, aes256, aes, all
+  -etype <TYPE>          Kerberos encryption type: rc4, aes128, aes256, aes128-sha2, aes256-sha2, aes-sha2, aes, all
   -save                  Save acquired tickets to .ccache files
 
 authentication:
