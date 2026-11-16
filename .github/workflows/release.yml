@@ -78,9 +78,8 @@ jobs:
           mkdir -p "${DEB_AMD64}/DEBIAN" "${DEB_AMD64}/usr/bin" "${DEB_AMD64}/usr/include" "${DEB_AMD64}/usr/share/doc/impacket-rs"
           install -m 755 "${BIN_AMD64}" "${DEB_AMD64}/usr/bin/impacket-rs"
           install -m 644 crates/impacket-cabi/include/impacket.h "${DEB_AMD64}/usr/include/impacket.h"
-          install -m 644 packaging/debian/copyright "${DEB_AMD64}/usr/share/doc/impacket-rs/copyright"
-          sed -e "s/@VERSION@/${VERSION}/g" -e "s/Architecture: amd64/Architecture: amd64/g" packaging/debian/control.template > "${DEB_AMD64}/DEBIAN/control"
-          echo "Installed-Size: ${SIZE_AMD64}" >> "${DEB_AMD64}/DEBIAN/control"
+          install -m 644 LICENSE "${DEB_AMD64}/usr/share/doc/impacket-rs/copyright"
+          printf "Package: impacket-rs\nVersion: %s\nSection: net\nPriority: optional\nArchitecture: amd64\nMaintainer: Nestho <nestho@icloud.com>\nInstalled-Size: %s\nHomepage: https://github.com/nestho/impacket-rs\nDescription: High-performance pure-Rust Active Directory and network protocol toolkit\n Impacket-RS is a memory-safe, high-performance pure-Rust rewrite and modernization\n of network protocols and Active Directory security tools.\n" "${VERSION}" "${SIZE_AMD64}" > "${DEB_AMD64}/DEBIAN/control"
           dpkg-deb --build --root-owner-group "${DEB_AMD64}" "impacket-rs-${TAG}-linux-amd64.deb"
 
           # Package arm64 .deb
@@ -90,9 +89,8 @@ jobs:
           mkdir -p "${DEB_ARM64}/DEBIAN" "${DEB_ARM64}/usr/bin" "${DEB_ARM64}/usr/include" "${DEB_ARM64}/usr/share/doc/impacket-rs"
           install -m 755 "${BIN_ARM64}" "${DEB_ARM64}/usr/bin/impacket-rs"
           install -m 644 crates/impacket-cabi/include/impacket.h "${DEB_ARM64}/usr/include/impacket.h"
-          install -m 644 packaging/debian/copyright "${DEB_ARM64}/usr/share/doc/impacket-rs/copyright"
-          sed -e "s/@VERSION@/${VERSION}/g" -e "s/Architecture: amd64/Architecture: arm64/g" packaging/debian/control.template > "${DEB_ARM64}/DEBIAN/control"
-          echo "Installed-Size: ${SIZE_ARM64}" >> "${DEB_ARM64}/DEBIAN/control"
+          install -m 644 LICENSE "${DEB_ARM64}/usr/share/doc/impacket-rs/copyright"
+          printf "Package: impacket-rs\nVersion: %s\nSection: net\nPriority: optional\nArchitecture: arm64\nMaintainer: Nestho <nestho@icloud.com>\nInstalled-Size: %s\nHomepage: https://github.com/nestho/impacket-rs\nDescription: High-performance pure-Rust Active Directory and network protocol toolkit\n Impacket-RS is a memory-safe, high-performance pure-Rust rewrite and modernization\n of network protocols and Active Directory security tools.\n" "${VERSION}" "${SIZE_ARM64}" > "${DEB_ARM64}/DEBIAN/control"
           dpkg-deb --build --root-owner-group "${DEB_ARM64}" "impacket-rs-${TAG}-linux-arm64.deb"
 
           # Convert to RedHat (.rpm) using alien
