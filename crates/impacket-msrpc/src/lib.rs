@@ -24,6 +24,7 @@ pub mod fsrvp;
 pub mod gkdi;
 pub mod lsat;
 pub mod mgmt;
+pub mod par;
 pub mod rprn;
 pub mod rrp;
 pub mod samr;
@@ -60,6 +61,10 @@ pub use lsat::{LsatClient, SidNameUse, TranslatedName};
 pub use mgmt::{
     probe_opnums, MgmtClient, OpnumStatus, RpcIfId, MGMT_INTERFACE_UUID, MGMT_VERSION_MAJOR,
     MGMT_VERSION_MINOR,
+};
+pub use par::{
+    AsyncDriverDirResult, AsyncEnumResult, ParClient, SplClientInfo1, PAR_INTERFACE_UUID, PAR_PIPE,
+    PAR_VERSION_MAJOR, PAR_VERSION_MINOR, WINSPOOL_INTERFACE_UUID,
 };
 pub use rprn::{
     RprnClient, RPRN_INTERFACE_UUID, RPRN_PIPE, RPRN_VERSION_MAJOR, RPRN_VERSION_MINOR,

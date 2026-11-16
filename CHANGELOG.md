@@ -23,7 +23,14 @@ This project follows **Semantic Versioning 2.0.0 (SemVer)** and the exact change
 
 ## [Unreleased]
 
-1. Remote DPAPI System & Credential Harvester (`dpapidump` & `crates/impacket-sam`)
+1. Print System Asynchronous Remote Protocol (`[MS-PAR]` & `crates/impacket-msrpc::par`)
+
+    * **MS-PAR Spooler Interface Client (`crates/impacket-msrpc::par`)**:
+        * Implemented pure-Rust RPC methods for Print System Asynchronous Remote Protocol (UUID `76f03f96-cdfd-44fc-a22c-64950a001209` v1.0 and WinSpool `9940ca8e-512f-4c58-88a9-61098d6896bd`) over `\PIPE\spoolss`.
+        * Implemented `RpcAsyncOpenPrinter` (Opnum 0) with `SPLCLIENT_CONTAINER` Level 1 negotiation, `RpcAsyncClosePrinter` (Opnum 20), `RpcAsyncEnumPrinters` (Opnum 38), and `RpcAsyncGetPrinterDriverDirectory` (Opnum 41).
+        * Added `ParClient` supporting two-stage buffer discovery (`ERROR_INSUFFICIENT_BUFFER` 122 query -> allocated fetch).
+
+2. Remote DPAPI System & Credential Harvester (`dpapidump` & `crates/impacket-sam`)
 
     * **DPAPI System & Credential Blob Parser (`crates/impacket-sam::dpapi`)**:
         * Implemented `DpapiSystem` parsing LSA `DPAPI_SYSTEM` 44-byte structure into `machine_key` and `user_key` with SHA-1 validation.
