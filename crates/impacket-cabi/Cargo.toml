@@ -11,9 +11,9 @@ description = "Pure-Rust C ABI and FFI bindings for impacket-rs"
 crate-type = ["cdylib", "staticlib", "rlib"]
 
 [dependencies]
-impacket-core = { path = "../impacket-core", version = "0.4.0" }
-impacket-crypto = { path = "../impacket-crypto", version = "0.4.0" }
-impacket-auth = { path = "../impacket-auth", version = "0.4.0" }
-impacket-ndr = { path = "../impacket-ndr", version = "0.4.0" }
-impacket-krb5 = { path = "../impacket-krb5", version = "0.4.0" }
-impacket-sam = { path = "../impacket-sam", version = "0.4.0" }
+impacket-core = { path = "../impacket-core", version = "0.4.1" }
+impacket-crypto = { path = "../impacket-crypto", version = "0.4.1" }
+impacket-auth = { path = "../impacket-auth", version = "0.4.1" }
+impacket-ndr = { path = "../impacket-ndr", version = "0.4.1" }
+impacket-krb5 = { path = "../impacket-krb5", version = "0.4.1" }
+impacket-sam = { path = "../impacket-sam", version = "0.4.1" }

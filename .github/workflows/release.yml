@@ -39,63 +39,161 @@ jobs:
             --title "Impacket-RS ${{ github.ref_name }} - High-Performance Active Directory & Protocol Toolkit" \
             --notes-file RELEASE_BODY.md
 
-  upload-assets:
-    name: Build & Upload (${{ matrix.target }})
+  build-linux:
+    name: Build & Package Linux (Debian & RedHat amd64/arm64)
     needs: create-release
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
     permissions:
       contents: write
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - target: x86_64-unknown-linux-gnu
-            os: ubuntu-latest
-            bin_name: impacket-rs
-          - target: x86_64-unknown-linux-musl
-            os: ubuntu-latest
-            bin_name: impacket-rs
-          - target: aarch64-apple-darwin
-            os: macos-latest
-            bin_name: impacket-rs
-          - target: x86_64-apple-darwin
-            os: macos-latest
-            bin_name: impacket-rs
-          - target: x86_64-pc-windows-msvc
-            os: windows-latest
-            bin_name: impacket-rs.exe
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - name: Install Linux dependencies
-        if: runner.os == 'Linux' && contains(matrix.target, 'musl')
-        run: sudo apt-get update && sudo apt-get install -y musl-tools
-      - name: Add Rust target
-        run: rustup target add ${{ matrix.target }}
-      - name: Build release binary
-        run: cargo build --release --locked --target ${{ matrix.target }}
-      - name: Upload release asset
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        shell: bash
+      - name: Install build tools and alien
         run: |
-          tar -czf "impacket-rs-${{ matrix.target }}.tar.gz" -C "target/${{ matrix.target }}/release" "${{ matrix.bin_name }}"
-          gh release upload "${{ github.ref_name }}" "impacket-rs-${{ matrix.target }}.tar.gz" --clobber
+          sudo apt-get update
+          sudo apt-get install -y musl-tools alien rpm
+          curl -L https://github.com/cross-rs/cross/releases/download/v0.2.5/cross-x86_64-unknown-linux-musl.tar.gz | tar xz -C /tmp
+          chmod +x /tmp/cross
 
-      - name: Build and upload Debian package
-        if: matrix.target == 'x86_64-unknown-linux-musl'
+      - name: Add Rust target
+        run: rustup target add x86_64-unknown-linux-musl
+
+      - name: Build x86_64 musl binary
+        run: cargo build --release --locked --target x86_64-unknown-linux-musl
+
+      - name: Build aarch64 musl binary via cross
+        run: /tmp/cross build --release --locked --target aarch64-unknown-linux-musl
+
+      - name: Package Debian (.deb) and RedHat (.rpm) packages
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          DEB_DIR="impacket-rs_${VERSION}_amd64"
-          BIN_PATH="target/${{ matrix.target }}/release/${{ matrix.bin_name }}"
-          BIN_SIZE_KB=$(du -k "${BIN_PATH}" | cut -f1)
-          mkdir -p "${DEB_DIR}/DEBIAN" "${DEB_DIR}/usr/bin" "${DEB_DIR}/usr/include" "${DEB_DIR}/usr/share/doc/impacket-rs"
-          install -m 755 "${BIN_PATH}" "${DEB_DIR}/usr/bin/impacket-rs"
-          install -m 644 crates/impacket-cabi/include/impacket.h "${DEB_DIR}/usr/include/impacket.h"
-          install -m 644 packaging/debian/copyright "${DEB_DIR}/usr/share/doc/impacket-rs/copyright"
-          sed "s/@VERSION@/${VERSION}/g" packaging/debian/control.template > "${DEB_DIR}/DEBIAN/control"
-          echo "Installed-Size: ${BIN_SIZE_KB}" >> "${DEB_DIR}/DEBIAN/control"
-          dpkg-deb --build --root-owner-group "${DEB_DIR}" "impacket-rs-${{ matrix.target }}.deb"
-          gh release upload "${{ github.ref_name }}" "impacket-rs-${{ matrix.target }}.deb" --clobber
+          TAG="${GITHUB_REF_NAME}"
+
+          # Package amd64 .deb
+          DEB_AMD64="impacket-rs_${VERSION}_amd64"
+          BIN_AMD64="target/x86_64-unknown-linux-musl/release/impacket-rs"
+          SIZE_AMD64=$(du -k "${BIN_AMD64}" | cut -f1)
+          mkdir -p "${DEB_AMD64}/DEBIAN" "${DEB_AMD64}/usr/bin" "${DEB_AMD64}/usr/include" "${DEB_AMD64}/usr/share/doc/impacket-rs"
+          install -m 755 "${BIN_AMD64}" "${DEB_AMD64}/usr/bin/impacket-rs"
+          install -m 644 crates/impacket-cabi/include/impacket.h "${DEB_AMD64}/usr/include/impacket.h"
+          install -m 644 packaging/debian/copyright "${DEB_AMD64}/usr/share/doc/impacket-rs/copyright"
+          sed -e "s/@VERSION@/${VERSION}/g" -e "s/Architecture: amd64/Architecture: amd64/g" packaging/debian/control.template > "${DEB_AMD64}/DEBIAN/control"
+          echo "Installed-Size: ${SIZE_AMD64}" >> "${DEB_AMD64}/DEBIAN/control"
+          dpkg-deb --build --root-owner-group "${DEB_AMD64}" "impacket-rs-${TAG}-linux-amd64.deb"
+
+          # Package arm64 .deb
+          DEB_ARM64="impacket-rs_${VERSION}_arm64"
+          BIN_ARM64="target/aarch64-unknown-linux-musl/release/impacket-rs"
+          SIZE_ARM64=$(du -k "${BIN_ARM64}" | cut -f1)
+          mkdir -p "${DEB_ARM64}/DEBIAN" "${DEB_ARM64}/usr/bin" "${DEB_ARM64}/usr/include" "${DEB_ARM64}/usr/share/doc/impacket-rs"
+          install -m 755 "${BIN_ARM64}" "${DEB_ARM64}/usr/bin/impacket-rs"
+          install -m 644 crates/impacket-cabi/include/impacket.h "${DEB_ARM64}/usr/include/impacket.h"
+          install -m 644 packaging/debian/copyright "${DEB_ARM64}/usr/share/doc/impacket-rs/copyright"
+          sed -e "s/@VERSION@/${VERSION}/g" -e "s/Architecture: amd64/Architecture: arm64/g" packaging/debian/control.template > "${DEB_ARM64}/DEBIAN/control"
+          echo "Installed-Size: ${SIZE_ARM64}" >> "${DEB_ARM64}/DEBIAN/control"
+          dpkg-deb --build --root-owner-group "${DEB_ARM64}" "impacket-rs-${TAG}-linux-arm64.deb"
+
+          # Convert to RedHat (.rpm) using alien
+          sudo alien -r --nodeps "impacket-rs-${TAG}-linux-amd64.deb"
+          sudo mv impacket-rs*amd64*.rpm "impacket-rs-${TAG}-linux-amd64.rpm" || sudo mv impacket-rs*.x86_64.rpm "impacket-rs-${TAG}-linux-amd64.rpm"
+
+          sudo alien -r --nodeps "impacket-rs-${TAG}-linux-arm64.deb"
+          sudo mv impacket-rs*arm64*.rpm "impacket-rs-${TAG}-linux-arm64.rpm" || sudo mv impacket-rs*.aarch64.rpm "impacket-rs-${TAG}-linux-arm64.rpm"
+
+          # Upload Linux packages
+          gh release upload "${TAG}" \
+            "impacket-rs-${TAG}-linux-amd64.deb" \
+            "impacket-rs-${TAG}-linux-arm64.deb" \
+            "impacket-rs-${TAG}-linux-amd64.rpm" \
+            "impacket-rs-${TAG}-linux-arm64.rpm" \
+            --clobber
+
+  build-macos:
+    name: Build & Package macOS DMG (arm64 & x86_64)
+    needs: create-release
+    runs-on: macos-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Add Rust targets
+        run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
+      - name: Build aarch64 & x86_64 binaries
+        run: |
+          cargo build --release --locked --target aarch64-apple-darwin
+          cargo build --release --locked --target x86_64-apple-darwin
+      - name: Create Apple Disk Images (.dmg)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+
+          # Package arm64 DMG
+          mkdir -p dmg_arm64/impacket-rs
+          cp target/aarch64-apple-darwin/release/impacket-rs dmg_arm64/impacket-rs/
+          cp crates/impacket-cabi/include/impacket.h dmg_arm64/impacket-rs/
+          cp LICENSE README.md dmg_arm64/impacket-rs/
+          hdiutil create -volname "Impacket-RS" -srcfolder dmg_arm64/impacket-rs -ov -format UDZO "impacket-rs-${TAG}-macos-arm64.dmg"
+
+          # Package x86_64 DMG
+          mkdir -p dmg_x86_64/impacket-rs
+          cp target/x86_64-apple-darwin/release/impacket-rs dmg_x86_64/impacket-rs/
+          cp crates/impacket-cabi/include/impacket.h dmg_x86_64/impacket-rs/
+          cp LICENSE README.md dmg_x86_64/impacket-rs/
+          hdiutil create -volname "Impacket-RS" -srcfolder dmg_x86_64/impacket-rs -ov -format UDZO "impacket-rs-${TAG}-macos-x86_64.dmg"
+
+          gh release upload "${TAG}" \
+            "impacket-rs-${TAG}-macos-arm64.dmg" \
+            "impacket-rs-${TAG}-macos-x86_64.dmg" \
+            --clobber
+
+  build-windows:
+    name: Build & Package Windows Executables (amd64 & arm64)
+    needs: create-release
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Add Rust targets
+        run: rustup target add x86_64-pc-windows-msvc aarch64-pc-windows-msvc
+      - name: Build Windows binaries
+        run: |
+          cargo build --release --locked --target x86_64-pc-windows-msvc
+          cargo build --release --locked --target aarch64-pc-windows-msvc
+      - name: Upload Windows executables
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          cp target/x86_64-pc-windows-msvc/release/impacket-rs.exe "impacket-rs-${TAG}-windows-amd64.exe"
+          cp target/aarch64-pc-windows-msvc/release/impacket-rs.exe "impacket-rs-${TAG}-windows-arm64.exe"
+
+          gh release upload "${TAG}" \
+            "impacket-rs-${TAG}-windows-amd64.exe" \
+            "impacket-rs-${TAG}-windows-arm64.exe" \
+            --clobber
+
+  manifest:
+    name: Compute & Upload SHA-256 Checksums Manifest
+    needs: [build-linux, build-macos, build-windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Download all assets and generate SHA256SUMS.txt
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          mkdir -p /tmp/all_release_assets
+          gh release download "${TAG}" -D /tmp/all_release_assets --pattern "impacket-rs-*" --clobber
+          cd /tmp/all_release_assets
+          sha256sum impacket-rs-* > SHA256SUMS.txt
+          gh release upload "${TAG}" SHA256SUMS.txt --clobber

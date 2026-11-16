@@ -23,7 +23,36 @@ This project follows **Semantic Versioning 2.0.0 (SemVer)** and the exact change
 
 ## [Unreleased]
 
-Active development for post-v0.4.0 roadmap.
+Active development for post-v0.4.1 roadmap.
+
+---
+
+## [v0.4.1] - 2026-11-16
+
+1. Multi-Platform OS Packaging & Professional Distribution Suite
+
+    * **Debian & Kali Linux Native Packages (`packaging/debian/`)**:
+        * Added automated production of Debian/Kali packages (**`impacket-rs-v0.4.1-linux-amd64.deb`** and **`impacket-rs-v0.4.1-linux-arm64.deb`**).
+        * Embedded C ABI development header (**`/usr/include/impacket.h`**), executable binary (**`/usr/bin/impacket-rs`**), and license documentation.
+        * Configured dynamic sizing and binary architecture detection (`amd64`, `arm64`) using Debian control templates.
+
+    * **RedHat, Fedora & Rocky Linux Packages**:
+        * Added automated native RPM package generation (**`impacket-rs-v0.4.1-linux-amd64.rpm`** and **`impacket-rs-v0.4.1-linux-arm64.rpm`**).
+        * Full compatibility with `dnf`, `yum`, and `rpm` package managers across RHEL 8/9, Fedora, Rocky Linux, and CentOS Stream.
+
+    * **Apple macOS Compressed Disk Images (`.dmg`)**:
+        * Built native Apple Disk Images (**`impacket-rs-v0.4.1-macos-arm64.dmg`** and **`impacket-rs-v0.4.1-macos-x86_64.dmg`**) via native **`hdiutil`**.
+        * Universal support covering Apple Silicon (M1/M2/M3/M4) and Intel Core architectures.
+        * Bundled root volume with binary executable, C/C++ FFI development headers, and documentation.
+
+    * **Microsoft Windows 64-Bit Executables (`.exe`)**:
+        * Added standalone official PE executables (**`impacket-rs-v0.4.1-windows-amd64.exe`** and **`impacket-rs-v0.4.1-windows-arm64.exe`**).
+        * Native support for both x86_64 and Windows on ARM64 platforms.
+
+    * **Standardized Asset Nomenclature & Verification Manifest**:
+        * Completely removed compiler target triple artifacts (no `unknown` in filenames).
+        * Standardized uniform naming format across all 8 distribution assets: **`impacket-rs-v0.4.1-<os>-<arch>.<ext>`**.
+        * Automated real-time SHA-256 cryptographic manifest generation (**`SHA256SUMS.txt`**).
 
 ---
 
