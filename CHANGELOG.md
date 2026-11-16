@@ -23,7 +23,19 @@ This project follows **Semantic Versioning 2.0.0 (SemVer)** and the exact change
 
 ## [Unreleased]
 
-1. Shell Auto-Completion Generator Suite (Phase 4)
+1. Windows Server 2025 dMSA Exploitation Suite (`badsuccessor`)
+
+    * **Delegated Managed Service Account Engine (`crates/impacket-ldap::dmsa`)**:
+        * Implemented Akamai BadSuccessor attack vector targeting Windows Server 2025 Active Directory environments.
+        * **OU Vulnerability Scanner (`scan_vulnerable_ous`)**: Audits Organizational Units for loose ACLs granting non-admin accounts `CreateChild` (`msDS-DelegatedManagedServiceAccount` schema GUID `0feb936f-47b3-49f2-9386-1dedc2c23765`), `GenericAll`, `WriteDacl`, or `WriteOwner` rights.
+        * **dMSA Account Provisioner (`add_dmsa`)**: Provisions `msDS-DelegatedManagedServiceAccount` objects configuring `msDS-ManagedAccountPrecededByLink` linking to target predecessor accounts (Domain Admins / Domain Controllers) and `msDS-GroupMSAMembership` access control entries.
+        * **Management Lifecycle (`delete_dmsa`, `modify_dmsa_predecessor`)**: Supports removing created dMSA objects and modifying predecessor links.
+
+    * **Unified `badsuccessor` CLI Subcommand (`bins/impacket-rs`)**:
+        * Added `impacket-rs badsuccessor <TARGET> -action <search|add|delete|modify> [options]`.
+        * Comprehensive parameters: `-target-ou`, `-dmsa-name`, `-target-account`, `-principals-allowed`, `-dns-hostname`, and `-base-dn`.
+
+2. Shell Auto-Completion Generator Suite (Phase 4)
 
     * **Universal Multi-Shell Auto-Completion (`bins/impacket-rs::completions`)**:
         * Added native auto-completion script generator supporting **Bash**, **Zsh**, **Fish**, and **PowerShell** (`impacket-rs completions <bash|zsh|fish|powershell>`).
