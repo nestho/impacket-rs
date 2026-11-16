@@ -21,6 +21,12 @@ This project follows **Semantic Versioning 2.0.0 (SemVer)** and the exact change
 
 ---
 
+## [Unreleased]
+
+Active development for post-v0.4.0 roadmap.
+
+---
+
 ## [v0.4.0] - 2026-11-16
 
 ### 🚀 Highlights & Architectural Overview
