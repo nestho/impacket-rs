@@ -10,6 +10,7 @@ pub const SUBCOMMANDS: &[(&str, &str)] = &[
     ("getGMSAPassword", "Read and decrypt Group Managed Service Account (gMSA) passwords over LDAP"),
     ("CheckLDAPStatus", "Audit LDAP server RootDSE, supported capabilities, TLS/SSL configuration, and signing enforcement"),
     ("addcomputer", "Create or inject a new Active Directory computer account via LDAP SAMR or SAMAccountAdd"),
+    ("badsuccessor", "Windows Server 2025 Delegated Managed Service Account (dMSA) exploitation suite (BadSuccessor)"),
     ("dacledit", "Inspect, modify, or add discretionary access control entries (ACEs) to AD objects"),
     ("owneredit", "Inspect and change Active Directory object owner SID via LDAP security descriptors"),
     ("dnstool", "Active Directory Integrated DNS (ADIDNS) record query, creation, modification, and tombstoning"),
@@ -131,6 +132,10 @@ _impacket_rs_complete() {{
             ;;
         bloodhound)
             COMPREPLY=($(compgen -W "$common_opts -zip -json -o -base -dc-ip -port" -- "$cur"))
+            return 0
+            ;;
+        badsuccessor)
+            COMPREPLY=($(compgen -W "$common_opts -action -target-ou -dmsa-name -target-account -principals-allowed -dns-hostname -base-dn" -- "$cur"))
             return 0
             ;;
         coerce)
@@ -263,6 +268,19 @@ _impacket_rs() {{
                 '-dc-ip[Domain Controller IP address]:ip:' \
                 '-hashes[LM:NTLM credential hashes]:hashes:' \
                 '-no-pass[Do not prompt for password]' \
+                '-proxy[Route traffic through SOCKS5 or HTTP proxy]:proxy:' \
+                '-h[Show help]' '--help[Show help]'
+            ;;
+        badsuccessor)
+            _arguments \
+                '-action[Action to perform (search, add, delete, modify)]:action:(search add delete modify)' \
+                '-target-ou[Target OU Distinguished Name]:ou:' \
+                '-dmsa-name[Name of dMSA]:name:' \
+                '-target-account[Predecessor target account]:account:' \
+                '-principals-allowed[Username allowed to retrieve managed password]:user:' \
+                '-dns-hostname[DNS hostname for dMSA]:host:' \
+                '-base-dn[Custom search base DN]:base:' \
+                '-port[LDAP port]:port:' \
                 '-proxy[Route traffic through SOCKS5 or HTTP proxy]:proxy:' \
                 '-h[Show help]' '--help[Show help]'
             ;;

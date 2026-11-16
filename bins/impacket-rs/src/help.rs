@@ -273,6 +273,29 @@ authentication:
 examples:
   impacket-rs addcomputer corp.local/jdoe:Pass123!@192.168.1.10 -computer-name FAKEDC -computer-pass ComputerPass123!
 "#),
+        "badsuccessor" => Some(r#"Description: Windows Server 2025 Delegated Managed Service Account (dMSA) exploitation suite (BadSuccessor).
+
+usage: impacket-rs badsuccessor [options] <target>
+
+positional arguments:
+  target: [host] or [[domain/]username[:password]@]<host>
+
+options:
+  -h, --help            show this help message and exit
+  -action <ACTION>      Action to perform: search (default), add, delete, modify
+  -target-ou <OU_DN>    Specific OU to target or check (e.g., "OU=VulnerableOU,DC=domain,DC=local")
+  -dmsa-name <NAME>     Name of dMSA account to add or delete (e.g. "dmsa_svc")
+  -target-account <ACC> Predecessor user or computer account to link (default: "Administrator")
+  -principals-allowed <USER> Username allowed to retrieve managed password
+  -dns-hostname <FQDN>  DNS hostname for the dMSA
+  -base-dn <DN>         Base DN for search (default: domain root DN)
+  -port <PORT>          LDAP port (default: 389, or 636)
+
+examples:
+  impacket-rs badsuccessor corp.local/user:pass@192.168.1.10 -action search
+  impacket-rs badsuccessor corp.local/user:pass@192.168.1.10 -action add -target-ou "OU=Workstations,DC=corp,DC=local" -dmsa-name dmsa_svc -target-account Administrator
+  impacket-rs badsuccessor corp.local/user:pass@192.168.1.10 -action delete -target-ou "OU=Workstations,DC=corp,DC=local" -dmsa-name dmsa_svc
+"#),
         "atexec" => Some(r#"Description: Executes remote commands via the Microsoft Task Scheduler service (MS-TSCH over \PIPE\atsvc). Creates, triggers, and deletes a scheduled task, retrieving command output over SMB.
 
 usage: impacket-rs atexec [options] <target> [command]
@@ -2052,6 +2075,9 @@ pub fn canonicalize_name(name: &str) -> &'static str {
         "gmsa" => "getGMSAPassword",
         "checkldapstatus" => "CheckLDAPStatus",
         "addcomputer" => "addcomputer",
+        "badsuccessor" => "badsuccessor",
+        "bad-successor" => "badsuccessor",
+        "dmsa" => "badsuccessor",
         "dacledit" => "dacledit",
         "owneredit" => "owneredit",
         "dnstool" => "dnstool",
@@ -2163,7 +2189,7 @@ mod tests {
             "atq", "eventlog", "compat-matrix", "parse-target", "ntlm-hash",
             "krb5-asreq", "smb-negotiate", "rpc-interfaces", "bench-ndr",
             "secretsdump-local", "regsecrets", "netfiles", "smbserver", "smbexec", "dcomexec",
-            "completions",
+            "completions", "badsuccessor",
         ];
         for tool in tools {
             let help = get_tool_help(tool);

