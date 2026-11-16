@@ -57,6 +57,7 @@ pub const SUBCOMMANDS: &[(&str, &str)] = &[
     ("ntdsdump", "Dump Active Directory database (NTDS.dit) hashes offline using pure-Rust ESE/JET engine"),
     ("esentutl", "Inspect and dump Microsoft Extensible Storage Engine (ESE/JET) database pages, catalogs, and tables"),
     ("dpapi", "Decrypt Windows DPAPI masterkeys, blobs, credentials, and vault entries"),
+    ("dpapidump", "Remote DPAPI SYSTEM credentials and MasterKeys harvester over SMB and LSA"),
     ("backupkey", "Retrieve LSA domain backup recovery keys over MS-BKRP for DPAPI recovery"),
     ("Get-GPPPassword", "Decrypt XML Group Policy Preference (GPP) passwords from SYSVOL or offline files"),
     ("ticketConverter", "Convert Kerberos credential caches between Linux MIT .ccache and Windows Mimikatz .kirbi"),
