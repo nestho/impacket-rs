@@ -10,8 +10,15 @@
 </p>
 
 <p align="center">
+  <a href="https://www.producthunt.com/products/impacket-rs?utm_source=badge-featured&utm_medium=badge" target="_blank">
+    <img src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=impacket-rs&theme=neutral" alt="impacket-rs - Memory-safe Rust implementation of Windows network protocols | Product Hunt" width="250" height="54" />
+  </a>
+</p>
+
+<p align="center">
   <a href="https://github.com/nestho/impacket-rs/actions/workflows/ci.yml"><img src="https://github.com/nestho/impacket-rs/actions/workflows/ci.yml/badge.svg" alt="CI Status"/></a>
   <a href="https://www.bestpractices.dev/projects/16665"><img src="https://www.bestpractices.dev/projects/16665/badge" alt="OpenSSF Best Practices"/></a>
+  <a href="https://www.producthunt.com/products/impacket-rs"><img src="https://img.shields.io/badge/Product_Hunt-impacket--rs-FF6154?logo=producthunt&logoColor=white" alt="Product Hunt"/></a>
   <img src="https://img.shields.io/badge/license-Apache--2.0-blue.svg" alt="License"/>
   <img src="https://img.shields.io/badge/rust-1.75%2B%20(2021)-orange.svg" alt="Rust 2021 Edition"/>
   <img src="https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-brightgreen.svg" alt="Platform"/>
