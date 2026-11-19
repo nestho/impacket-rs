@@ -75,19 +75,24 @@ pub use par::{
 pub use rprn::{
     RprnClient, RPRN_INTERFACE_UUID, RPRN_PIPE, RPRN_VERSION_MAJOR, RPRN_VERSION_MINOR,
 };
+pub use rrp::{
+    encode_reg_data, format_reg_data, parse_reg_key_path, reg_type, RegHive, RegistryCheckResult,
+    RemoteHostSecurityReport, RrpClient, KEY_READ, MAXIMUM_ALLOWED,
+};
 pub use samr::{
     user_access as samr_user_access, DomainEnumEntry, SamrClient, SamprHandle,
 };
 pub use scmr::{
-    access as scmr_access, error_control_str, service_state, service_type, start_type,
-    start_type_str, EnumServiceStatus, ScmrClient, ServiceConfig, ServiceStatus,
+    access as scmr_access, error_control_str, is_unquoted_service_path, service_state, service_type,
+    start_type, start_type_str, EnumServiceStatus, ScmrClient, ServiceAuditFinding, ServiceConfig,
+    ServiceStatus,
 };
 pub use srvs::{
     FileInfo3, SessionInfo10, ShareInfo1, ShareType, SrvsClient, PERM_FILE_CREATE, PERM_FILE_READ,
     PERM_FILE_WRITE,
 };
 pub use transport::SmbPipeTransport;
-pub use tsch::{TaskInfo, TaskState, TschClient};
+pub use tsch::{extract_xml_tag, TaskAuditFinding, TaskInfo, TaskState, TschClient};
 pub use wkst::{
     NetJoinStatus, WkstClient, WkstaInfo100, WkstaUserInfo1, WKST_INTERFACE_UUID,
     WKST_VERSION_MAJOR, WKST_VERSION_MINOR,

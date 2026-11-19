@@ -3,6 +3,7 @@
 
 pub mod addcomputer;
 pub mod asn1;
+pub mod audit;
 pub mod bloodhound;
 pub mod client;
 pub mod dacledit;
@@ -19,6 +20,10 @@ pub use asn1::{
     filter_and, filter_equality, filter_not, filter_or, filter_present, op_tag, result_code,
     AttributeModification, BindAuth, LdapAttribute, LdapControl, LdapMessage, ModifyOperation,
     ProtocolOp, SearchScope, CONTROL_PAGED_RESULTS,
+};
+pub use audit::{
+    audit_domain_security, AdminCountAccount, AsrepRoastableAccount, DomainSecurityReport,
+    KerberoastableAccount, WeakAccountPolicyFinding,
 };
 pub use bloodhound::{
     collect_bloodhound_data, BloodHoundAce, BloodHoundComputer, BloodHoundDomain, BloodHoundDump,

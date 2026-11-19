@@ -445,6 +445,51 @@ impl<T: RpcTransport> TschClient<T> {
         let resp = self.call(opnum::SCH_RPC_GET_TASK_INFO, stub)?;
         parse_get_task_info_response(&resp)
     }
+
+    /// Audits all scheduled tasks under `root_path` for misconfigurations such as unquoted paths.
+    pub fn audit_tasks(&mut self, root_path: &str) -> Result<Vec<TaskAuditFinding>, CoreError> {
+        let task_names = self.enum_all_tasks_recursive(root_path)?;
+        let mut findings = Vec::with_capacity(task_names.len());
+        for t in task_names {
+            let info = self.get_task_info(&t).ok();
+            let enabled = info.map(|i| i.enabled).unwrap_or(true);
+            let xml = self.retrieve_task(&t).unwrap_or_default();
+            let exec = extract_xml_tag(&xml, "Command");
+            let args = extract_xml_tag(&xml, "Arguments");
+            let is_unquoted = exec
+                .as_deref()
+                .map(crate::scmr::is_unquoted_service_path)
+                .unwrap_or(false);
+
+            findings.push(TaskAuditFinding {
+                task_path: t,
+                enabled,
+                action_exec: exec,
+                action_arguments: args,
+                is_unquoted,
+            });
+        }
+        Ok(findings)
+    }
+}
+
+/// Security assessment finding for an individual scheduled task.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TaskAuditFinding {
+    pub task_path: String,
+    pub enabled: bool,
+    pub action_exec: Option<String>,
+    pub action_arguments: Option<String>,
+    pub is_unquoted: bool,
+}
+
+/// Helper to extract text between `<TAG>...</TAG>` in scheduled task XML definitions.
+pub fn extract_xml_tag(xml: &str, tag: &str) -> Option<String> {
+    let open_tag = format!("<{}>", tag);
+    let close_tag = format!("</{}>", tag);
+    let start = xml.find(&open_tag)? + open_tag.len();
+    let end = xml[start..].find(&close_tag)? + start;
+    Some(xml[start..end].trim().to_string())
 }
 
 #[cfg(test)]
@@ -584,5 +629,13 @@ mod tests {
         assert!(!info2.enabled);
         assert_eq!(info2.state, TaskState::Disabled);
         assert_eq!(info2.state.name(), "Disabled");
+    }
+
+    #[test]
+    fn test_extract_xml_tag() {
+        let xml = r#"<Task><Actions><Exec><Command>C:\Program Files\My Tool\tool.exe</Command><Arguments>-silent</Arguments></Exec></Actions></Task>"#;
+        assert_eq!(extract_xml_tag(xml, "Command").as_deref(), Some(r"C:\Program Files\My Tool\tool.exe"));
+        assert_eq!(extract_xml_tag(xml, "Arguments").as_deref(), Some("-silent"));
+        assert_eq!(extract_xml_tag(xml, "NonExistent"), None);
     }
 }

@@ -845,6 +845,204 @@ impl<T: RpcTransport> RrpClient<T> {
         }
         Ok(keys)
     }
+
+    /// Audits remote host security posture via Remote Registry (`\pipe\winreg`).
+    pub fn audit_security_settings(&mut self) -> Result<RemoteHostSecurityReport, CoreError> {
+        let hklm = self.open_local_machine(KEY_READ)?;
+
+        let read_dword = |client: &mut Self, subkey: &str, val_name: &str| -> Option<u32> {
+            if let Ok(key) = client.open_key(&hklm, subkey, KEY_READ) {
+                let res = match client.query_value(&key, val_name) {
+                    Ok((reg_type::REG_DWORD, data)) if data.len() >= 4 => {
+                        Some(u32::from_le_bytes([data[0], data[1], data[2], data[3]]))
+                    }
+                    _ => None,
+                };
+                let _ = client.close_key(&key);
+                res
+            } else {
+                None
+            }
+        };
+
+        // 1. RunAsPPL (LSA Protection)
+        let ppl_val = read_dword(self, r"SYSTEM\CurrentControlSet\Control\Lsa", "RunAsPPL");
+        let lsa_protection = RegistryCheckResult {
+            key: r"HKLM\SYSTEM\CurrentControlSet\Control\Lsa".into(),
+            value_name: "RunAsPPL".into(),
+            raw_value: ppl_val,
+            status: match ppl_val {
+                Some(1) => "Enabled (Protected Process Light without UEFI lock)".into(),
+                Some(2) => "Enabled (Protected Process Light with UEFI lock)".into(),
+                Some(0) => "Disabled".into(),
+                _ => "Not Configured / Disabled".into(),
+            },
+            vulnerable: ppl_val.unwrap_or(0) == 0,
+            remediation: "Set RunAsPPL=1 under HKLM\\SYSTEM\\CurrentControlSet\\Control\\Lsa to prevent LSASS memory injection/dumping.".into(),
+        };
+
+        // 2. LsaCfgFlags (Credential Guard)
+        let cg_val = read_dword(self, r"SYSTEM\CurrentControlSet\Control\Lsa", "LsaCfgFlags");
+        let credential_guard = RegistryCheckResult {
+            key: r"HKLM\SYSTEM\CurrentControlSet\Control\Lsa".into(),
+            value_name: "LsaCfgFlags".into(),
+            raw_value: cg_val,
+            status: match cg_val {
+                Some(1) => "Credential Guard Enabled (Without UEFI Lock)".into(),
+                Some(2) => "Credential Guard Enabled (With UEFI Lock)".into(),
+                Some(0) => "Credential Guard Disabled".into(),
+                _ => "Not Configured / Disabled".into(),
+            },
+            vulnerable: cg_val.unwrap_or(0) == 0,
+            remediation: "Enable Credential Guard via GPO (Computer Config -> System -> Device Guard) or set LsaCfgFlags=1.".into(),
+        };
+
+        // 3. WDigest (UseLogonCredential)
+        let wd_val = read_dword(
+            self,
+            r"SYSTEM\CurrentControlSet\Control\SecurityProviders\WDigest",
+            "UseLogonCredential",
+        );
+        let wdigest_use_logon_credential = RegistryCheckResult {
+            key: r"HKLM\SYSTEM\CurrentControlSet\Control\SecurityProviders\WDigest".into(),
+            value_name: "UseLogonCredential".into(),
+            raw_value: wd_val,
+            status: match wd_val {
+                Some(1) => "Vulnerable (Cleartext credentials retained in LSASS)".into(),
+                Some(0) => "Disabled (Cleartext credentials disabled)".into(),
+                _ => "Default (Cleartext credentials disabled)".into(),
+            },
+            vulnerable: wd_val == Some(1),
+            remediation: "Set UseLogonCredential=0 under WDigest to prevent plaintext password caching in memory.".into(),
+        };
+
+        // 4. EnableLUA (UAC)
+        let lua_val = read_dword(
+            self,
+            r"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System",
+            "EnableLUA",
+        );
+        let uac_enable_lua = RegistryCheckResult {
+            key: r"HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System".into(),
+            value_name: "EnableLUA".into(),
+            raw_value: lua_val,
+            status: match lua_val {
+                Some(0) => "Disabled (User Account Control completely inactive)".into(),
+                Some(1) => "Enabled".into(),
+                _ => "Default (Enabled)".into(),
+            },
+            vulnerable: lua_val == Some(0),
+            remediation: "Set EnableLUA=1 under Policies\\System to enforce UAC prompts.".into(),
+        };
+
+        // 5. LocalAccountTokenFilterPolicy (Remote UAC)
+        let latf_val = read_dword(
+            self,
+            r"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System",
+            "LocalAccountTokenFilterPolicy",
+        );
+        let local_account_token_filter = RegistryCheckResult {
+            key: r"HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System".into(),
+            value_name: "LocalAccountTokenFilterPolicy".into(),
+            raw_value: latf_val,
+            status: match latf_val {
+                Some(1) => "Bypassed (Remote admin tokens not filtered - allows remote administrative access with local accounts)".into(),
+                Some(0) => "Active (Remote admin tokens stripped)".into(),
+                _ => "Default / Active (Remote admin tokens stripped)".into(),
+            },
+            vulnerable: latf_val == Some(1),
+            remediation: "Set LocalAccountTokenFilterPolicy=0 to block remote administrative PTH access with non-RID-500 local accounts.".into(),
+        };
+
+        // 6. AlwaysInstallElevated
+        let aie_val = read_dword(
+            self,
+            r"SOFTWARE\Policies\Microsoft\Windows\Installer",
+            "AlwaysInstallElevated",
+        );
+        let always_install_elevated = RegistryCheckResult {
+            key: r"HKLM\SOFTWARE\Policies\Microsoft\Windows\Installer".into(),
+            value_name: "AlwaysInstallElevated".into(),
+            raw_value: aie_val,
+            status: match aie_val {
+                Some(1) => "Vulnerable (Unprivileged users can install MSIs with SYSTEM privileges)".into(),
+                _ => "Disabled / Safe".into(),
+            },
+            vulnerable: aie_val == Some(1),
+            remediation: "Set AlwaysInstallElevated=0 (or remove policy) to prevent privilege escalation via malicious MSI installations.".into(),
+        };
+
+        // 7. LanmanServer requiresecuritysignature (SMB Signing)
+        let smb_val = read_dword(
+            self,
+            r"SYSTEM\CurrentControlSet\Services\LanmanServer\Parameters",
+            "requiresecuritysignature",
+        );
+        let smb_signing_required = RegistryCheckResult {
+            key: r"HKLM\SYSTEM\CurrentControlSet\Services\LanmanServer\Parameters".into(),
+            value_name: "requiresecuritysignature".into(),
+            raw_value: smb_val,
+            status: match smb_val {
+                Some(1) => "Enforced (SMB signing required)".into(),
+                _ => "Not Enforced (Vulnerable to NTLM Relay attacks)".into(),
+            },
+            vulnerable: smb_val != Some(1),
+            remediation: "Set requiresecuritysignature=1 under LanmanServer\\Parameters to prevent NTLM Relay to SMB.".into(),
+        };
+
+        let _ = self.close_key(&hklm);
+
+        Ok(RemoteHostSecurityReport {
+            lsa_protection,
+            credential_guard,
+            wdigest_use_logon_credential,
+            uac_enable_lua,
+            local_account_token_filter,
+            always_install_elevated,
+            smb_signing_required,
+        })
+    }
+}
+
+/// Result of an individual registry security configuration audit check.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RegistryCheckResult {
+    pub key: String,
+    pub value_name: String,
+    pub raw_value: Option<u32>,
+    pub status: String,
+    pub vulnerable: bool,
+    pub remediation: String,
+}
+
+/// Consolidated remote host security audit report queried via `[MS-RRP]`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RemoteHostSecurityReport {
+    pub lsa_protection: RegistryCheckResult,
+    pub credential_guard: RegistryCheckResult,
+    pub wdigest_use_logon_credential: RegistryCheckResult,
+    pub uac_enable_lua: RegistryCheckResult,
+    pub local_account_token_filter: RegistryCheckResult,
+    pub always_install_elevated: RegistryCheckResult,
+    pub smb_signing_required: RegistryCheckResult,
+}
+
+impl RemoteHostSecurityReport {
+    pub fn all_checks(&self) -> Vec<&RegistryCheckResult> {
+        vec![
+            &self.lsa_protection,
+            &self.credential_guard,
+            &self.wdigest_use_logon_credential,
+            &self.uac_enable_lua,
+            &self.local_account_token_filter,
+            &self.always_install_elevated,
+            &self.smb_signing_required,
+        ]
+    }
+
+    pub fn vulnerable_checks(&self) -> Vec<&RegistryCheckResult> {
+        self.all_checks().into_iter().filter(|c| c.vulnerable).collect()
+    }
 }
 
 #[cfg(test)]
@@ -1000,5 +1198,90 @@ mod tests {
         let enc_bin = encode_reg_data(reg_type::REG_BINARY, "dead beef cafe").unwrap();
         assert_eq!(enc_bin, vec![0xde, 0xad, 0xbe, 0xef, 0xca, 0xfe]);
         assert_eq!(format_reg_data(reg_type::REG_BINARY, &enc_bin), "deadbeefcafe");
+    }
+
+    #[test]
+    fn test_audit_security_settings() {
+        let hklm = [0x11u8; 20];
+        let sub = [0x22u8; 20];
+
+        fn dword_resp(val: u32) -> Vec<u8> {
+            let mut query_resp = Vec::new();
+            query_resp.extend_from_slice(&REFERENT_BASE.to_le_bytes());
+            query_resp.extend_from_slice(&reg_type::REG_DWORD.to_le_bytes());
+            query_resp.extend_from_slice(&(REFERENT_BASE + 4).to_le_bytes());
+            let val_bytes = val.to_le_bytes();
+            query_resp.extend_from_slice(&(val_bytes.len() as u32).to_le_bytes());
+            query_resp.extend_from_slice(&0u32.to_le_bytes());
+            query_resp.extend_from_slice(&(val_bytes.len() as u32).to_le_bytes());
+            query_resp.extend_from_slice(&val_bytes);
+            while query_resp.len() % 4 != 0 {
+                query_resp.push(0);
+            }
+            query_resp.extend_from_slice(&(REFERENT_BASE + 8).to_le_bytes());
+            query_resp.extend_from_slice(&(val_bytes.len() as u32).to_le_bytes());
+            query_resp.extend_from_slice(&(REFERENT_BASE + 12).to_le_bytes());
+            query_resp.extend_from_slice(&(val_bytes.len() as u32).to_le_bytes());
+            query_resp.extend_from_slice(&0u32.to_le_bytes());
+            query_resp
+        }
+
+        // Mock response sequence for 7 checks:
+        // 1. OpenLocalMachine
+        // 2. RunAsPPL: open_key -> query_value(1) -> close_key
+        // 3. LsaCfgFlags: open_key -> query_value(0) -> close_key
+        // 4. WDigest: open_key -> query_value(1) -> close_key
+        // 5. EnableLUA: open_key -> query_value(1) -> close_key
+        // 6. LocalAccountTokenFilter: open_key -> query_value(1) -> close_key
+        // 7. AlwaysInstallElevated: open_key -> query_value(0) -> close_key
+        // 8. LanmanServer requiresecuritysignature: open_key -> query_value(1) -> close_key
+        // 9. CloseKey(hklm)
+        let mock = MockRrp::new(vec![
+            handle_resp(hklm),
+            // RunAsPPL (1 = safe)
+            handle_resp(sub),
+            dword_resp(1),
+            error_resp(),
+            // LsaCfgFlags (0 = vulnerable)
+            handle_resp(sub),
+            dword_resp(0),
+            error_resp(),
+            // WDigest (1 = vulnerable)
+            handle_resp(sub),
+            dword_resp(1),
+            error_resp(),
+            // EnableLUA (1 = safe)
+            handle_resp(sub),
+            dword_resp(1),
+            error_resp(),
+            // LocalAccountTokenFilterPolicy (1 = vulnerable)
+            handle_resp(sub),
+            dword_resp(1),
+            error_resp(),
+            // AlwaysInstallElevated (0 = safe)
+            handle_resp(sub),
+            dword_resp(0),
+            error_resp(),
+            // LanmanServer requiresecuritysignature (1 = safe)
+            handle_resp(sub),
+            dword_resp(1),
+            error_resp(),
+            // Close HKLM
+            error_resp(),
+        ]);
+
+        let mut c = RrpClient::new(mock);
+        let rep = c.audit_security_settings().unwrap();
+
+        assert!(!rep.lsa_protection.vulnerable);
+        assert!(rep.credential_guard.vulnerable);
+        assert!(rep.wdigest_use_logon_credential.vulnerable);
+        assert!(!rep.uac_enable_lua.vulnerable);
+        assert!(rep.local_account_token_filter.vulnerable);
+        assert!(!rep.always_install_elevated.vulnerable);
+        assert!(!rep.smb_signing_required.vulnerable);
+
+        let vulns = rep.vulnerable_checks();
+        assert_eq!(vulns.len(), 3);
     }
 }

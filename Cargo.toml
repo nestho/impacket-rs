@@ -16,11 +16,12 @@ members = [
     "crates/impacket-mssql",
     "crates/impacket-adcs",
     "crates/impacket-cabi",
+    "crates/impacket-experimental",
     "bins/impacket-rs",
 ]
 
 [workspace.package]
-version = "0.5.0"
+version = "0.6.0"
 edition = "2021"
 authors = ["Nestho <nestho@icloud.com>"]
 license = "Apache-2.0"

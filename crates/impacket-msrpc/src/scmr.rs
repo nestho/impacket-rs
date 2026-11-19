@@ -72,6 +72,7 @@ pub mod service_type {
     pub const SERVICE_FILE_SYSTEM_DRIVER: u32 = 0x0000_0002;
     pub const SERVICE_WIN32_OWN_PROCESS: u32 = 0x0000_0010;
     pub const SERVICE_WIN32_SHARE_PROCESS: u32 = 0x0000_0020;
+    pub const SERVICE_WIN32: u32 = SERVICE_WIN32_OWN_PROCESS | SERVICE_WIN32_SHARE_PROCESS;
     pub const SERVICE_INTERACTIVE_PROCESS: u32 = 0x0000_0100;
     pub const SERVICE_TYPE_ALL: u32 = SERVICE_WIN32_OWN_PROCESS
         | SERVICE_KERNEL_DRIVER
@@ -699,6 +700,88 @@ impl<T: RpcTransport> ScmrClient<T> {
         let r = self.call(opnum::R_CLOSE_SERVICE_HANDLE, build_handle_stub(handle))?;
         parse_status_only_response(&r).map(|_| ())
     }
+
+    /// Enumerates and audits all services for common misconfigurations:
+    /// - Unquoted service paths containing spaces (local privilege escalation vector)
+    /// - Non-system / third-party services running with LocalSystem privileges
+    pub fn audit_services(&mut self) -> Result<Vec<ServiceAuditFinding>, CoreError> {
+        let scm = self.open_sc_manager(None, access::SC_MANAGER_ENUMERATE_SERVICE)?;
+        let services = match self.enum_services_status(
+            &scm,
+            service_type::SERVICE_WIN32,
+            service_state::SERVICE_STATE_ALL,
+        ) {
+            Ok(s) => s,
+            Err(e) => {
+                let _ = self.close_handle(&scm);
+                return Err(e);
+            }
+        };
+
+        let mut findings = Vec::with_capacity(services.len());
+        for s in services {
+            let svc = match self.open_service(&scm, &s.service_name, access::SERVICE_QUERY_CONFIG) {
+                Ok(h) => h,
+                Err(_) => continue,
+            };
+
+            if let Ok(cfg) = self.query_service_config(&svc) {
+                let unquoted = is_unquoted_service_path(&cfg.binary_path);
+                let lower_account = cfg.service_start_name.to_ascii_lowercase();
+                let is_system = lower_account == "localsystem"
+                    || lower_account == ".\\localsystem"
+                    || lower_account == "nt authority\\system"
+                    || lower_account.is_empty();
+                let lower_bin = cfg.binary_path.to_ascii_lowercase();
+                let is_windows_dir = lower_bin.starts_with(r"c:\windows\")
+                    || lower_bin.starts_with(r"%systemroot%\")
+                    || lower_bin.starts_with(r"\systemroot\");
+                let is_third_party_system = is_system && !is_windows_dir && !lower_bin.is_empty();
+
+                findings.push(ServiceAuditFinding {
+                    service_name: s.service_name,
+                    display_name: s.display_name,
+                    binary_path: cfg.binary_path,
+                    start_type: cfg.start_type,
+                    service_account: cfg.service_start_name,
+                    is_unquoted: unquoted,
+                    is_third_party_system,
+                });
+            }
+            let _ = self.close_handle(&svc);
+        }
+        let _ = self.close_handle(&scm);
+        Ok(findings)
+    }
+}
+
+/// Security assessment finding for an individual Windows service.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ServiceAuditFinding {
+    pub service_name: String,
+    pub display_name: String,
+    pub binary_path: String,
+    pub start_type: u32,
+    pub service_account: String,
+    pub is_unquoted: bool,
+    pub is_third_party_system: bool,
+}
+
+/// Checks whether an executable path is vulnerable to unquoted service path privilege escalation.
+///
+/// Returns true if the binary path contains spaces and does not enclose the executable path in quotes.
+pub fn is_unquoted_service_path(path: &str) -> bool {
+    let trimmed = path.trim();
+    if trimmed.is_empty() || trimmed.starts_with('"') || trimmed.starts_with('\'') {
+        return false;
+    }
+    // Extract up to .exe (case-insensitive) or first argument
+    let exe_path = if let Some(idx) = trimmed.to_ascii_lowercase().find(".exe") {
+        &trimmed[..idx + 4]
+    } else {
+        trimmed.split_whitespace().next().unwrap_or(trimmed)
+    };
+    exe_path.contains(' ')
 }
 
 #[cfg(test)]
@@ -870,5 +953,17 @@ mod tests {
         assert_eq!(services[0].display_name, "Print Spooler");
         assert_eq!(services[0].status.current_state, service_state::SERVICE_RUNNING);
         assert_eq!(services[0].status.state_str(), "RUNNING");
+    }
+
+    #[test]
+    fn test_is_unquoted_service_path() {
+        assert!(is_unquoted_service_path(r"C:\Program Files\Vendor App\service.exe"));
+        assert!(is_unquoted_service_path(r"C:\Program Files\Vendor App\service.exe -k run"));
+        assert!(is_unquoted_service_path(r"C:\My Tools\app.exe /start"));
+        assert!(!is_unquoted_service_path(r#""C:\Program Files\Vendor App\service.exe""#));
+        assert!(!is_unquoted_service_path(r#""C:\Program Files\Vendor App\service.exe" -k run"#));
+        assert!(!is_unquoted_service_path(r"C:\Windows\System32\svchost.exe -k netsvcs"));
+        assert!(!is_unquoted_service_path(r"C:\Windows\system32\lsass.exe"));
+        assert!(!is_unquoted_service_path(""));
     }
 }

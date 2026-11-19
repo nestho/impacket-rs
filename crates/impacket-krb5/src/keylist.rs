@@ -70,6 +70,7 @@ fn generate_deterministic_bytes(seed: &[u8], len: usize) -> Vec<u8> {
 /// - `kvno` is formatted as `rodc_no << 16`
 /// - Ticket contains a signed PAC with `PAC_REQUESTOR_INFO` matching `domain_sid-user_rid` (required by CVE-2021-42287)
 /// - Encrypted with `rodc_key` using Key Usage 2 (`KU_TICKET`)
+#[allow(clippy::too_many_arguments)]
 pub fn create_partial_tgt(
     domain: &str,
     username: &str,
@@ -242,6 +243,7 @@ pub fn find_nthash(keys: &[(i32, Vec<u8>)]) -> Option<String> {
 }
 
 /// Executes a live KERB-KEY-LIST exchange against an Active Directory KDC.
+#[allow(clippy::too_many_arguments)]
 pub fn dump_user_keylist_live(
     kdc_host: &str,
     kdc_port: u16,
