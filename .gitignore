@@ -15,5 +15,8 @@ HANDOFF.md
 test_*.txt
 *.pcap
 
-# graft's local graph cache — regenerable, not committed (run `graft build`).
+# Internal product roadmaps & unreleased R&D docs
+docs/INTERNAL_*
+.upstream-sha
+scripts/
 /graft/

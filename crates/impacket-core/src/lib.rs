@@ -23,9 +23,16 @@ pub mod version {
 }
 
 pub mod der;
+pub mod net;
 pub mod transport;
+pub mod vault;
 
+pub use net::{
+    cldap_ping, ports as ad_ports, probe_host, probe_targets, CldapDcInfo, DiscoveredHost,
+    IpRange, IpRangeIter, ParseIpRangeError, ProberConfig, TargetList,
+};
 pub use transport::{ProxyAuth, ProxyConfig, ProxyType, TransportStream};
+pub use vault::{CredentialRecord, HostRecord, OperatorVault};
 
 /// Volatile memory wipe helper (equivalent to `zeroize`) to ensure sensitive
 /// keys, passwords, and NTLM hashes are scrubbed from RAM on `Drop`.

@@ -35,6 +35,108 @@ examples:
   impacket-rs CheckLDAPStatus 192.168.1.10
   impacket-rs CheckLDAPStatus 192.168.1.10 -port 636
 "#),
+        "scan" => Some(r#"Description: NetExec-style high-concurrency Active Directory multi-protocol port prober and host fingerprinter.
+
+usage: impacket-rs scan [options] <target>
+
+positional arguments:
+  target: IP, CIDR range (192.168.1.0/24), dash range (10.0.0.1-50), or comma-separated targets
+
+options:
+  -h, --help            show this help message and exit
+  -p, -ports <PORTS>     Comma-separated list of ports to probe (default: 445,135,389,636,88,1433,5985,5986,9389)
+  -t, -threads <NUM>     Concurrency limit in worker threads (default: 100)
+  --timeout <MS>         Connection timeout in milliseconds per port (default: 500)
+  --no-fingerprint       Disable live SMB negotiate and CLDAP ping OS fingerprinting
+
+examples:
+  impacket-rs scan 192.168.1.0/24
+  impacket-rs scan 10.0.0.1-10.0.0.100 -p 445,135,389 -t 200
+  impacket-rs scan 172.16.0.0/16 --timeout 300
+"#),
+        "cldap" => Some(r#"Description: Sends an unauthenticated Netlogon ping over Connectionless LDAP (UDP 389) to extract domain topology, DC hostname, forest root, site name, and OS build.
+
+usage: impacket-rs cldap [options] <target>
+
+positional arguments:
+  target: Target Domain Controller IP address
+
+options:
+  -h, --help            show this help message and exit
+  --timeout <MS>         UDP timeout in milliseconds (default: 2000)
+
+examples:
+  impacket-rs cldap 192.168.1.10
+  impacket-rs cldap 10.0.0.1 --timeout 1500
+"#),
+        "kerbrute" => Some(r#"Description: High-speed Kerberos username enumeration and password spraying without generating 4625 failed logons on endpoints.
+
+usage: impacket-rs kerbrute -d <DOMAIN> --dc <DC_IP> [options] <user1,user2... | -U userlist.txt>
+
+options:
+  -h, --help            show this help message and exit
+  -d, -domain <DOMAIN>  Active Directory domain (e.g. CORP.LOCAL)
+  --dc <IP>             Domain Controller IP address (default: domain hostname)
+  -u, -user <USER>      Single username to test
+  -U, -users <FILE>     Path to file containing usernames (one per line)
+  -p, -password <PASS>  Password to spray (if omitted, performs fast user enumeration)
+  -t, -threads <NUM>    Worker thread concurrency limit (default: 50)
+  --timeout <MS>        Socket timeout in milliseconds (default: 2000)
+
+examples:
+  impacket-rs kerbrute -d corp.local --dc 192.168.1.10 -U users.txt
+  impacket-rs kerbrute -d corp.local --dc 192.168.1.10 -p Spring2026! -U users.txt -t 100
+"#),
+        "audit" => Some(r#"Description: Agentless Windows host and Active Directory domain security configuration auditor.
+
+usage: impacket-rs audit [options] <scope> <target>
+
+positional arguments:
+  scope: host | domain
+  target: [host] or [[domain/]username[:password]@]<host>
+
+options:
+  -h, --help            show this help message and exit
+  -hashes LM:NT         NTLM pass-the-hash authentication
+  -base-dn <DN>         Active Directory search base DN (domain audit)
+  -dc-ip <IP>           Override Domain Controller IP address
+  -port <PORT>          Target connection port (445 for host, 389/636 for domain)
+
+examples:
+  impacket-rs audit host corp.local/admin:Password123!@192.168.1.50
+  impacket-rs audit host 192.168.1.50 -hashes :e52cac67419a9a224a3b108f3fa6cb6d
+  impacket-rs audit domain corp.local/jdoe:Pass!@192.168.1.10 -base-dn "DC=corp,DC=local"
+"#),
+        "hosts" => Some(r#"Description: Operator State Vault host manager. Lists discovered network hosts, services, and pwned status.
+
+usage: impacket-rs hosts [options] [clear]
+
+options:
+  -h, --help            show this help message and exit
+  --pwned               Show only compromised hosts with administrator privileges
+  clear                 Clear all host records from the operator vault
+
+examples:
+  impacket-rs hosts
+  impacket-rs hosts --pwned
+  impacket-rs hosts clear
+"#),
+        "creds" => Some(r#"Description: Operator State Vault credential manager. Lists and manages captured passwords and hashes.
+
+usage: impacket-rs creds [options] [add <user> <secret>] [clear]
+
+options:
+  -h, --help            show this help message and exit
+  -domain <D>           Domain name for added credential
+  -type <T>             Secret type (password, nthash, aes256)
+  -source <S>           Origin source (DCSync, LSASS, SAM, Kerberoast, Manual)
+  clear                 Clear all credential records from the operator vault
+
+examples:
+  impacket-rs creds
+  impacket-rs creds add Administrator e52cac67419a9a224a3b108f3fa6cb6d -domain CORP -type nthash -source DCSync
+  impacket-rs creds clear
+"#),
         "DumpNTLMInfo" => Some(r#"Description: Dumps remote host NetBIOS, DNS computer name, domain name, forest, and OS version without authentication via SMB2/3 NTLMSSP challenge.
 
 usage: impacket-rs DumpNTLMInfo [options] <target>
@@ -2209,9 +2311,24 @@ pub fn canonicalize_name(name: &str) -> &'static str {
         "gpp" => "Get-GPPPassword",
         "getuserpac" => "getPac",
         "ldapshell" => "ldapclient",
+        "scan" => "scan",
+        "netexec" => "scan",
+        "nxc" => "scan",
+        "prober" => "scan",
+        "cldap" => "cldap",
+        "cldap-ping" => "cldap",
+        "cldapping" => "cldap",
+        "kerbrute" => "kerbrute",
+        "spray" => "kerbrute",
+        "passwordspray" => "kerbrute",
         "dfssearch" => "dfsclient",
         "tsch" => "atq",
         "ping6" => "ping",
+        "audit" => "audit",
+        "winpwn" => "audit",
+        "hosts" => "hosts",
+        "creds" => "creds",
+        "credentials" => "creds",
         _ => "",
     }
 }
@@ -2239,7 +2356,8 @@ mod tests {
             "atq", "eventlog", "compat-matrix", "parse-target", "ntlm-hash",
             "krb5-asreq", "smb-negotiate", "rpc-interfaces", "bench-ndr",
             "secretsdump-local", "regsecrets", "netfiles", "smbserver", "smbexec", "dcomexec",
-            "completions", "badsuccessor", "keylistattack",
+            "completions", "badsuccessor", "keylistattack", "scan", "cldap", "kerbrute",
+            "audit", "hosts", "creds",
         ];
         for tool in tools {
             let help = get_tool_help(tool);

@@ -698,6 +698,7 @@ impl CredentialBlob {
     }
 }
 
+#[allow(clippy::chunks_exact_to_as_chunks)]
 fn read_utf16le_string(bytes: &[u8]) -> String {
     let u16s: Vec<u16> = bytes
         .chunks_exact(2)

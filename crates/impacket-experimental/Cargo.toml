@@ -1,0 +1,15 @@
+[package]
+name = "impacket-experimental"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Bleeding-edge research primitives, 0-day PoCs, and experimental protocol extensions for Impacket-RS"
+
+[features]
+default = []
+fast = []
+adws = []
+sapphire = []
+coercion = []
+
+[dependencies]

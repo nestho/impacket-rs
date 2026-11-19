@@ -438,6 +438,92 @@ pub unsafe extern "C" fn impacket_krb5_parse_asrep_hashcat(
     IMPACKET_OK
 }
 
+/// Computes NTLMv2 challenge response and 16-byte session base key.
+///
+/// # Safety
+/// All pointers must be valid and non-null. `out_nt_response` must point to a buffer of at least `out_nt_response_len` bytes.
+#[no_mangle]
+pub unsafe extern "C" fn impacket_compute_ntlmv2_response(
+    username: *const c_char,
+    domain: *const c_char,
+    nt_hash: *const u8,
+    server_challenge_8: *const u8,
+    client_challenge_8: *const u8,
+    target_info: *const u8,
+    target_info_len: usize,
+    out_nt_response: *mut u8,
+    out_nt_response_len: *mut usize,
+    out_session_key: *mut u8,
+) -> i32 {
+    if username.is_null()
+        || domain.is_null()
+        || nt_hash.is_null()
+        || server_challenge_8.is_null()
+        || client_challenge_8.is_null()
+        || out_nt_response.is_null()
+        || out_nt_response_len.is_null()
+        || out_session_key.is_null()
+    {
+        return IMPACKET_ERR_INVALID_PARAM;
+    }
+
+    let user_str = match CStr::from_ptr(username).to_str() {
+        Ok(s) => s,
+        Err(_) => return IMPACKET_ERR_PARSE_FAILED,
+    };
+    let domain_str = match CStr::from_ptr(domain).to_str() {
+        Ok(s) => s,
+        Err(_) => return IMPACKET_ERR_PARSE_FAILED,
+    };
+
+    let nt_slice = slice::from_raw_parts(nt_hash, 16);
+    let mut nt_arr = [0u8; 16];
+    nt_arr.copy_from_slice(nt_slice);
+    let hashes = impacket_core::NtlmHashes {
+        lm: [0u8; 16],
+        nt: nt_arr,
+        has_lm: false,
+    };
+
+    let srv_slice = slice::from_raw_parts(server_challenge_8, 8);
+    let mut srv_arr = [0u8; 8];
+    srv_arr.copy_from_slice(srv_slice);
+
+    let cli_slice = slice::from_raw_parts(client_challenge_8, 8);
+    let mut cli_arr = [0u8; 8];
+    cli_arr.copy_from_slice(cli_slice);
+
+    let tinfo = if !target_info.is_null() && target_info_len > 0 {
+        slice::from_raw_parts(target_info, target_info_len)
+    } else {
+        &[]
+    };
+
+    let computed = impacket_auth::compute_ntlmv2_response(
+        user_str,
+        domain_str,
+        &hashes,
+        &srv_arr,
+        &cli_arr,
+        impacket_core::FileTime::now(),
+        tinfo,
+    );
+
+    if *out_nt_response_len < computed.nt_challenge_response.len() {
+        *out_nt_response_len = computed.nt_challenge_response.len();
+        return IMPACKET_ERR_BUFFER_TOO_SMALL;
+    }
+
+    let out_nt = slice::from_raw_parts_mut(out_nt_response, computed.nt_challenge_response.len());
+    out_nt.copy_from_slice(&computed.nt_challenge_response);
+    *out_nt_response_len = computed.nt_challenge_response.len();
+
+    let out_sk = slice::from_raw_parts_mut(out_session_key, 16);
+    out_sk.copy_from_slice(&computed.session_base_key);
+
+    IMPACKET_OK
+}
+
 /// Frees dynamically allocated string allocated by impacket C ABI.
 ///
 /// # Safety
@@ -525,6 +611,37 @@ mod tests {
     }
 
     #[test]
+    fn test_impacket_compute_ntlmv2_response() {
+        let user = CString::new("Administrator").unwrap();
+        let domain = CString::new("CORP").unwrap();
+        let nt_hash = [0xa4, 0xf4, 0x9c, 0x40, 0x65, 0x10, 0xbd, 0xca, 0xb6, 0x82, 0x4e, 0xe7, 0xc3, 0x0f, 0xd8, 0x52];
+        let srv_chall = [0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08];
+        let cli_chall = [0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88];
+
+        let mut out_resp = [0u8; 512];
+        let mut out_resp_len = out_resp.len();
+        let mut out_sk = [0u8; 16];
+
+        let res = unsafe {
+            impacket_compute_ntlmv2_response(
+                user.as_ptr(),
+                domain.as_ptr(),
+                nt_hash.as_ptr(),
+                srv_chall.as_ptr(),
+                cli_chall.as_ptr(),
+                std::ptr::null(),
+                0,
+                out_resp.as_mut_ptr(),
+                &mut out_resp_len,
+                out_sk.as_mut_ptr(),
+            )
+        };
+        assert_eq!(res, IMPACKET_OK);
+        assert!(out_resp_len >= 48);
+        assert_ne!(out_sk, [0u8; 16]);
+    }
+
+    #[test]
     fn test_impacket_null_safety() {
         assert_eq!(unsafe { impacket_parse_target(std::ptr::null(), std::ptr::null_mut()) }, IMPACKET_ERR_INVALID_PARAM);
         assert_eq!(unsafe { impacket_ntlm_hash(std::ptr::null(), std::ptr::null_mut()) }, IMPACKET_ERR_INVALID_PARAM);
@@ -532,5 +649,6 @@ mod tests {
         assert_eq!(unsafe { impacket_md4(std::ptr::null(), 0, std::ptr::null_mut()) }, IMPACKET_ERR_INVALID_PARAM);
         assert_eq!(unsafe { impacket_decrypt_cpassword(std::ptr::null(), std::ptr::null_mut(), 0) }, IMPACKET_ERR_INVALID_PARAM);
         assert_eq!(unsafe { impacket_krb5_parse_asrep_hashcat(std::ptr::null(), 0, std::ptr::null(), std::ptr::null(), std::ptr::null_mut(), 0) }, IMPACKET_ERR_INVALID_PARAM);
+        assert_eq!(unsafe { impacket_compute_ntlmv2_response(std::ptr::null(), std::ptr::null(), std::ptr::null(), std::ptr::null(), std::ptr::null(), std::ptr::null(), 0, std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null_mut()) }, IMPACKET_ERR_INVALID_PARAM);
     }
 }

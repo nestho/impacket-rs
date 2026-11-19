@@ -252,9 +252,9 @@ pub fn parse_netr_server_password_set2_response(stub: &[u8]) -> Result<u32, Core
 /// - `ServerName`: [in, string, unique] wchar_t*
 pub fn build_netr_enumerate_trusted_domains_ex_stub(server_name: Option<&str>) -> Vec<u8> {
     let mut w = NdrWriter::with_capacity(64);
-    if server_name.is_some() {
+    if let Some(name) = server_name {
         w.write_u32(REFERENT_BASE);
-        write_string_wchar_pointee(&mut w, server_name.unwrap());
+        write_string_wchar_pointee(&mut w, name);
     } else {
         w.write_u32(0);
     }

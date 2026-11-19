@@ -23,6 +23,92 @@ This project follows **Semantic Versioning 2.0.0 (SemVer)** and the exact change
 
 ## [Unreleased]
 
+1. Zero-Allocation IP & CIDR Network Engine (`crates/impacket-core::net`)
+
+    * **High-Speed Target Parsing & Streaming Iterators**:
+        * Added `IpRange` supporting single IPv4/IPv6 addresses, CIDR notation (`10.0.0.0/16`, `192.168.1.0/24`), short dash ranges (`10.0.0.1-50`), and full IP dash ranges (`10.0.0.1-10.0.1.254`).
+        * Implemented zero-allocation streaming iterators (`Ipv4RangeIter`, `Ipv6RangeIter`, `IpRangeIter`) capable of traversing `/16` subnets (65,536 IPs) in sub-millisecond execution.
+        * Added `TargetList` parser for comma- and whitespace-separated target blocks.
+
+2. Offensive R&D Sandbox Crate (`crates/impacket-experimental`)
+
+    * **Isolated Bleeding-Edge Research Playground**:
+        * Scaffolded workspace crate `crates/impacket-experimental` with feature gates for `fast` (Kerberos RFC 6113 armoring), `adws` (TCP 9389 SOAP stealth recon), `sapphire` (PAC transplanting), and `coercion` (WebDAV/RPC coercion).
+
+3. Upstream Impacket Tracking Automation (`.github/workflows/upstream-sync.yml`)
+
+    * **Automated Cron Diff Watcher**:
+        * Added GitHub Actions workflow monitoring `fortra/impacket` commits daily, comparing against `.upstream-sha`, and creating structured tracking issues with target crate mappings.
+
+4. NetExec-Style Multi-Protocol Port Prober & Live Fingerprinter (`crates/impacket-core::net::prober` & `cldap`)
+
+    * **Concurrent Active Directory Port Scanner (`impacket-core::net::prober`)**:
+        * Implemented `probe_targets` scanning default AD protocol ports (445 SMB, 135 MSRPC, 389 LDAP, 636 LDAPS, 88 Kerberos, 1433 MSSQL, 5985/5986 WinRM, 9389 ADWS) with thread worker concurrency.
+        * Added live host detection returning `DiscoveredHost` with RTT and Domain Controller heuristics.
+    * **Connectionless LDAP Netlogon Ping (`impacket-core::net::cldap`)**:
+        * Implemented `cldap_ping` over UDP port 389 parsing `[MS-NRPC]` `LOGON_SAM_LOGON_RESPONSE_EX` to extract Domain FQDN, Forest Root, NetBIOS Domain/DC names, DC site, and server capabilities flags without authentication.
+    * **Unified CLI Subcommands (`bins/impacket-rs`)**:
+        * Added `impacket-rs scan <target>` (`netexec` / `nxc` aliases) supporting CIDR, dash ranges, and target lists with automatic SMB2/3 NTLMSSP and CLDAP live OS/domain fingerprinting.
+        * Added `impacket-rs cldap <target-ip>` for standalone unauthenticated Domain Controller discovery.
+
+5. High-Speed Kerberos Pre-Auth Sprayer & User Enumerator (`bins/impacket-rs::kerbrute`)
+
+    * **Kerbrute Engine**:
+        * Added `impacket-rs kerbrute` CLI subcommand supporting multi-threaded username enumeration and password spraying via Kerberos `AS-REQ` over port 88.
+        * Differentiates valid accounts (`KDC_ERR_PREAUTH_REQUIRED`), locked/disabled accounts (`KDC_ERR_CLIENT_REVOKED`), valid logins (`AS-REP`), and invalid users without triggering workstation Event ID 4625 failed logons.
+
+6. Remote WinPwn: Agentless Host Security Auditor (`crates/impacket-msrpc::rrp`, `scmr`, `tsch`)
+
+    * **Remote Registry Security Posture Assessment (`crates/impacket-msrpc::rrp`)**:
+        * Added `audit_security_settings` on `RrpClient` to remotely query `\pipe\winreg` for critical security misconfigurations:
+            * **LSA Protection (`RunAsPPL`)**: Detects disabled LSASS memory protection vulnerable to credential dumping.
+            * **Credential Guard (`LsaCfgFlags`)**: Detects absent virtualization-based security isolation for LSA secrets.
+            * **WDigest Caching (`UseLogonCredential`)**: Flags plaintext credentials cached in LSASS memory.
+            * **UAC Enforcement (`EnableLUA`)**: Audits complete disabling of User Account Control.
+            * **Remote UAC Token Filtering (`LocalAccountTokenFilterPolicy`)**: Identifies Pass-the-Hash elevation risks with non-RID-500 local admin accounts.
+            * **Privilege Escalation Risks (`AlwaysInstallElevated`)**: Flags policies allowing unprivileged users to install elevated MSIs.
+            * **SMB Signing Enforcement (`requiresecuritysignature`)**: Flags LanmanServer configurations vulnerable to NTLM relay attacks.
+    * **Remote Services Misconfiguration Scanner (`crates/impacket-msrpc::scmr`)**:
+        * Added `audit_services` on `ScmrClient` and `is_unquoted_service_path` helper to detect unquoted service paths containing spaces.
+        * Identifies third-party non-Windows services executing under high-privileged `LocalSystem` accounts.
+    * **Scheduled Tasks Audit (`crates/impacket-msrpc::tsch`)**:
+        * Added `audit_tasks` on `TschClient` and XML parsing helper `extract_xml_tag` to audit scheduled task actions for unquoted executable paths.
+
+7. Active Directory Domain Security Auditor (`crates/impacket-ldap::audit`)
+
+    * **Agentless LDAP Attack Surface Auditor (`crates/impacket-ldap::audit`)**:
+        * Added `audit_domain_security` to discover actionable Active Directory misconfigurations across the directory tree:
+            * **Kerberoasting**: Non-machine user accounts with configured `servicePrincipalName` attributes.
+            * **AS-REP Roasting**: Accounts configured with `DONT_REQ_PREAUTH` (0x00400000) allowing offline cracking without passwords.
+            * **Privileged Objects**: High-value accounts protected by `adminCount = 1` (AdminSDHolder targets).
+            * **Weak Account Policies**: Identifies `ENCRYPTED_TEXT_PWD_ALLOWED`, `PASSWD_NOTREQD`, and `DONT_EXPIRE_PASSWORD`.
+            * **Kerberos Delegation Chains**: Integrates `find_delegation` to uncover Unconstrained Delegation, Constrained Delegation (with protocol transition / S4U2Self), and Resource-Based Constrained Delegation (RBCD).
+    * **Unified Audit CLI (`bins/impacket-rs`)**:
+        * Added `impacket-rs audit host <target>` and `impacket-rs audit domain <target>` (aliases: `winpwn host`, `winpwn domain`).
+
+8. Kerberos over HTTPS Proxy (`[MS-KKDCP]` / RFC 7874 & `crates/impacket-krb5::kkdcp`)
+
+    * **MS-KKDCP Proxy Protocol Implementation (`crates/impacket-krb5::kkdcp`)**:
+        * Implemented `KdcProxyMessage` encapsulation and parsing per `[MS-KKDCP]` Section 2.2.2 (`ulLength` 4-byte LE framing + raw Kerberos PDU).
+        * Implemented HTTP/1.1 POST transport (`Content-Type: application/kerberos`) over HTTPS (default port 443, `/KdcProxy`).
+        * Added `send_as_req_kkdcp_live` and `send_as_req_kkdcp_over_stream` to perform Kerberos authentication and spraying when port 88 is filtered by perimeter firewalls.
+    * **CLI Proxy Flags (`bins/impacket-rs`)**:
+        * Added `-kdc-proxy <HOST[:PORT]>` flag to `impacket-rs getTGT` and `impacket-rs GetNPUsers`.
+
+9. Operator State Vault (`crates/impacket-core::vault`)
+
+    * **Cross-Tool Engagement State Persistence**:
+        * Implemented `HostRecord`, `CredentialRecord`, and `OperatorVault` using zero-dependency, self-contained JSON Lines (`.jsonl`) persistence stored at `~/.impacket-rs/vault.jsonl`.
+        * Added `impacket-rs hosts` CLI command with `--pwned` filter and `clear` option to manage discovered hosts.
+        * Added `impacket-rs creds` CLI command with `add` and `clear` operations to manage captured credentials across DCSync, SAM, LSASS, and Kerberoasting.
+        * Wired `impacket-rs scan` to automatically upsert discovered hosts, open ports, and fingerprint metadata into the state vault.
+
+10. C ABI & Ecosystem FFI Bindings Suite (`crates/impacket-cabi`)
+
+    * **Native Interoperability for C/C++ & Cobalt Strike BOFs**:
+        * Added `impacket_compute_ntlmv2_response` C export for calculating NTLMv2 challenge responses and 16-byte session base keys from NT hashes, server challenges, and target info.
+        * Verified full suite of C ABI exports covering target parsing (`impacket_parse_target`), NT/LM hashing (`impacket_ntlm_hash`, `impacket_lm_hash`), GPP decryption (`impacket_decrypt_cpassword`), and SID formatting (`impacket_sid_to_string`).
+
 ---
 
 ## [v0.5.0] - 2026-11-16

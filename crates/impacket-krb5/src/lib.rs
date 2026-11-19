@@ -10,6 +10,7 @@ pub mod ccache;
 pub mod crypto;
 pub mod fast;
 pub mod keylist;
+pub mod kkdcp;
 pub mod kpasswd;
 pub mod pac;
 pub mod pkinit;
@@ -30,6 +31,11 @@ pub use fast::{
 pub use kpasswd::{
     build_kpasswd_request, change_password_kpasswd_live, parse_kpasswd_response,
     KpasswdResponse, KpasswdResultCode, KPASSWD_DEFAULT_PORT,
+};
+
+pub use kkdcp::{
+    parse_http_kkdcp_response, send_as_req_kkdcp_live, send_as_req_kkdcp_over_stream,
+    KdcProxyMessage, DEFAULT_KKDCP_PATH, DEFAULT_KKDCP_PORT,
 };
 
 pub use pac::{
