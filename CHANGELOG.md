@@ -21,7 +21,7 @@ This project follows **Semantic Versioning 2.0.0 (SemVer)** and the exact change
 
 ---
 
-## [Unreleased]
+## [v0.6.0] - 2026-11-19
 
 1. Zero-Allocation IP & CIDR Network Engine (`crates/impacket-core::net`)
 
